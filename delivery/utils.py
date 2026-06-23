@@ -2,7 +2,7 @@
 Simulated map data, travel matrix, and route feasibility engine.
 """
 from .models import Location
-
+from datetime import timedelta
 
 # ==================== DATA: 9 Locations for Simulated Map ====================
 LOCATIONS_DATA = [
@@ -90,18 +90,8 @@ def calculate_nearest_neighbor_route(start_id, destination_ids):
 def validate_route_feasibility(destination_ids, due_times, start_time):
     """
     Validates if a courier can visit all destinations before their due times.
-    destination_ids: list of matrix_ids
-    due_times: dict {matrix_id: datetime}
-    start_time: datetime when route starts
-    Returns: (is_feasible, route_list, details_list)
+    All datetimes should be naive (local time) for accurate comparison.
     """
-    from datetime import timedelta
-    from django.utils import timezone
-
-    # Ensure start_time is timezone-aware
-    if timezone.is_naive(start_time):
-        start_time = timezone.make_aware(start_time)
-
     route, _ = calculate_nearest_neighbor_route(0, destination_ids)
     cumulative = 0
     current = 0
@@ -114,9 +104,9 @@ def validate_route_feasibility(destination_ids, due_times, start_time):
         arrival = start_time + timedelta(minutes=cumulative)
         due = due_times.get(nxt)
         
-        # Ensure both datetimes are timezone-aware for comparison
-        if due is not None and timezone.is_naive(due):
-            due = timezone.make_aware(due)
+        # Convert due to naive if aware
+        if due is not None and hasattr(due, 'tzinfo') and due.tzinfo is not None:
+            due = due.replace(tzinfo=None)
         
         on_time = arrival <= due if due else True
 

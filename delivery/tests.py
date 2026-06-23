@@ -827,3 +827,221 @@ class FullWorkflowTest(TestCase):
         order.refresh_from_db()
         self.assertEqual(order.status, 'DELIVERED')
         self.assertIsNotNone(order.delivered_at)
+        
+
+        # ==================== TEST: Route Feasibility Edge Case ====================
+# This test verifies that a courier CANNOT accept orders with impossible deadlines
+
+class RouteFeasibilityEdgeCaseTest(TestCase):
+    """Test that impossible routes are properly rejected."""
+
+    def setUp(self):
+        self.client = Client()
+        ensure_locations()
+
+        # Create merchant
+        self.merchant = User.objects.create_user('merchant_edge', 'me@test.com', 'pass123')
+        self.merchant.userprofile.role = 'MERCHANT'
+        self.merchant.userprofile.is_approved = True
+        self.merchant.userprofile.save()
+
+        # Create customer
+        self.customer = User.objects.create_user('customer_edge', 'ce@test.com', 'pass123')
+        self.customer.userprofile.role = 'CUSTOMER'
+        self.customer.userprofile.is_approved = True
+        self.customer.userprofile.save()
+
+        # Create courier
+        self.courier = User.objects.create_user('courier_edge', 'coe@test.com', 'pass123')
+        self.courier.userprofile.role = 'COURIER'
+        self.courier.userprofile.is_approved = True
+        self.courier.userprofile.save()
+
+        # Get locations
+        self.maple_st = Location.objects.get(matrix_id=1)      # 123 Maple Street
+        self.willow_blvd = Location.objects.get(matrix_id=8)  # 258 Willow Blvd
+
+        # Create menu item
+        self.item = MenuItem.objects.create(
+            merchant=self.merchant,
+            name='Test Burger',
+            price=10.00
+        )
+
+    def test_cannot_accept_impossible_route_10_minutes(self):
+        """
+        Test Case: Courier tries to accept two orders:
+        - Order 1: Restaurant -> 123 Maple Street (15 min travel)
+        - Order 2: Restaurant -> 258 Willow Blvd (28 min travel)
+        Due time: Only 10 minutes from now
+
+        Expected: REJECTED - Even the closest destination takes 15 min,
+        which exceeds the 10 min window.
+        """
+        # Create orders with 10-minute deadline (impossible)
+        deadline = timezone.now() + timedelta(minutes=10)
+
+        order1 = Order.objects.create(
+            customer=self.customer,
+            merchant=self.merchant,
+            destination=self.maple_st,
+            status='PENDING',
+            due_time=deadline,
+            notes='Order to Maple St'
+        )
+        OrderItem.objects.create(order=order1, menu_item=self.item, quantity=1)
+
+        order2 = Order.objects.create(
+            customer=self.customer,
+            merchant=self.merchant,
+            destination=self.willow_blvd,
+            status='PENDING',
+            due_time=deadline,
+            notes='Order to Willow Blvd'
+        )
+        OrderItem.objects.create(order=order2, menu_item=self.item, quantity=1)
+
+        # Courier attempts to accept both orders
+        self.client.login(username='courier_edge', password='pass123')
+        response = self.client.post(
+            reverse('api_accept_orders'),
+            data=json.dumps({'order_ids': [order1.id, order2.id]}),
+            content_type='application/json'
+        )
+
+        data = json.loads(response.content)
+
+        # MUST be rejected
+        self.assertFalse(
+            data['success'],
+            'Courier should NOT be able to accept orders with impossible 10-minute deadline'
+        )
+        self.assertIn('Cannot deliver', data['error'])
+
+        # Verify orders remain unassigned
+        order1.refresh_from_db()
+        order2.refresh_from_db()
+        self.assertIsNone(order1.courier)
+        self.assertIsNone(order2.courier)
+        self.assertEqual(order1.status, 'PENDING')
+        self.assertEqual(order2.status, 'PENDING')
+
+    def test_can_accept_feasible_route_60_minutes(self):
+        """
+        Same destinations but with 60-minute deadline.
+        Route: Restaurant -> Maple St (15 min) -> Willow Blvd (20 min) = 35 min total
+        Expected: ACCEPTED - 35 min < 60 min deadline
+        """
+        deadline = timezone.now() + timedelta(minutes=60)
+
+        order1 = Order.objects.create(
+            customer=self.customer,
+            merchant=self.merchant,
+            destination=self.maple_st,
+            status='PENDING',
+            due_time=deadline,
+            notes='Order to Maple St'
+        )
+        OrderItem.objects.create(order=order1, menu_item=self.item, quantity=1)
+
+        order2 = Order.objects.create(
+            customer=self.customer,
+            merchant=self.merchant,
+            destination=self.willow_blvd,
+            status='PENDING',
+            due_time=deadline,
+            notes='Order to Willow Blvd'
+        )
+        OrderItem.objects.create(order=order2, menu_item=self.item, quantity=1)
+
+        self.client.login(username='courier_edge', password='pass123')
+        response = self.client.post(
+            reverse('api_accept_orders'),
+            data=json.dumps({'order_ids': [order1.id, order2.id]}),
+            content_type='application/json'
+        )
+
+        data = json.loads(response.content)
+
+        # Should be accepted
+        self.assertTrue(
+            data['success'],
+            'Courier SHOULD be able to accept orders with 60-minute deadline'
+        )
+
+        # Verify orders assigned
+        order1.refresh_from_db()
+        order2.refresh_from_db()
+        self.assertEqual(order1.courier, self.courier)
+        self.assertEqual(order2.courier, self.courier)
+        self.assertEqual(order1.status, 'ACCEPTED')
+        self.assertEqual(order2.status, 'ACCEPTED')
+
+        # Verify route data exists
+        self.assertIn('route', data)
+        self.assertIn('details', data)
+
+        # Verify route starts at restaurant (0) and includes both destinations
+        route = data['route']
+        self.assertEqual(route[0], 0)  # Restaurant
+        self.assertIn(1, route)         # Maple St
+        self.assertIn(8, route)         # Willow Blvd
+
+    def test_single_order_maple_street_10_minutes_rejected(self):
+        """
+        Even single order to Maple St (15 min away) with 10 min deadline should fail.
+        """
+        deadline = timezone.now() + timedelta(minutes=10)
+
+        order = Order.objects.create(
+            customer=self.customer,
+            merchant=self.merchant,
+            destination=self.maple_st,
+            status='PENDING',
+            due_time=deadline,
+            notes='Single order to Maple St'
+        )
+        OrderItem.objects.create(order=order, menu_item=self.item, quantity=1)
+
+        self.client.login(username='courier_edge', password='pass123')
+        response = self.client.post(
+            reverse('api_accept_orders'),
+            data=json.dumps({'order_ids': [order.id]}),
+            content_type='application/json'
+        )
+
+        data = json.loads(response.content)
+        self.assertFalse(data['success'])
+        self.assertIn('Cannot deliver', data['error'])
+
+        order.refresh_from_db()
+        self.assertIsNone(order.courier)
+
+    def test_single_order_maple_street_20_minutes_accepted(self):
+        """
+        Single order to Maple St (15 min away) with 20 min deadline should succeed.
+        """
+        deadline = timezone.now() + timedelta(minutes=20)
+
+        order = Order.objects.create(
+            customer=self.customer,
+            merchant=self.merchant,
+            destination=self.maple_st,
+            status='PENDING',
+            due_time=deadline,
+            notes='Single order to Maple St'
+        )
+        OrderItem.objects.create(order=order, menu_item=self.item, quantity=1)
+
+        self.client.login(username='courier_edge', password='pass123')
+        response = self.client.post(
+            reverse('api_accept_orders'),
+            data=json.dumps({'order_ids': [order.id]}),
+            content_type='application/json'
+        )
+
+        data = json.loads(response.content)
+        self.assertTrue(data['success'])
+
+        order.refresh_from_db()
+        self.assertEqual(order.courier, self.courier)

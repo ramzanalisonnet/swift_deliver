@@ -10,6 +10,7 @@ from django.contrib.auth.models import User
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
+from datetime import datetime, timedelta
 from .models import UserProfile, Location, MenuItem, Order, OrderItem
 from .utils import (
     LOCATIONS_DATA, ensure_locations,
@@ -207,25 +208,16 @@ def api_place_order(request):
     if not item_list:
         return JsonResponse({'success': False, 'error': 'Your cart is empty.'})
 
-        # Handle due time
+    # Handle due time - KEEP NAIVE (local time)
     due_time_str = data.get('due_time')
     if due_time_str:
         try:
-            # Parse ISO format datetime (from datetime-local input)
-            from datetime import datetime
-            # Remove 'Z' or timezone info if present, then parse
-            due_time_str = due_time_str.replace('Z', '').replace('z', '')
-            if '.' in due_time_str:
-                due_time_str = due_time_str.split('.')[0]
             due_time = datetime.fromisoformat(due_time_str.replace('T', ' ').replace('t', ' '))
-            # Make it timezone-aware
-            from django.utils import timezone
-            if timezone.is_naive(due_time):
-                due_time = timezone.make_aware(due_time)
+            # DO NOT make it aware - keep as naive local time
         except (ValueError, TypeError):
-            due_time = timezone.now() + timezone.timedelta(hours=2)
+            due_time = datetime.now() + timedelta(hours=2)
     else:
-        due_time = timezone.now() + timezone.timedelta(hours=2)
+        due_time = datetime.now() + timedelta(hours=2)
 
     order = Order.objects.create(
         customer=request.user,
@@ -243,7 +235,6 @@ def api_place_order(request):
 
     return JsonResponse({'success': True, 'order_id': order.id, 'total': round(total, 2)})
 
-
 # ==================== API: merchant_create_order ====================
 @login_required
 @csrf_exempt
@@ -256,12 +247,23 @@ def api_merchant_create_order(request):
     
     data = json.loads(request.body)
     items = data.get('items', [])
-    
+
+    # Handle due time - KEEP NAIVE (local time)
+    due_time_str = data.get('due_time')
+    if due_time_str:
+        try:
+            due_time = datetime.fromisoformat(due_time_str.replace('T', ' ').replace('t', ' '))
+            # DO NOT make it aware - keep as naive local time
+        except (ValueError, TypeError):
+            due_time = datetime.now() + timedelta(hours=2)
+    else:
+        due_time = datetime.now() + timedelta(hours=2)
+
     order = Order.objects.create(
         merchant=request.user,
         customer=request.user,
         destination_id=data.get('destination_id'),
-        due_time=data.get('due_time'),
+        due_time=due_time,
         notes=data.get('notes', ''),
         status='PENDING'
     )
@@ -272,7 +274,6 @@ def api_merchant_create_order(request):
         OrderItem.objects.create(order=order, menu_item=menu_item, quantity=entry['quantity'])
     
     return JsonResponse({'success': True, 'order_id': order.id})
-
 
 # ==================== API: get_orders ====================
 @login_required
@@ -330,14 +331,14 @@ def api_accept_orders(request):
         if o.destination:
             mid = o.destination.matrix_id
             destination_ids.append(mid)
-            # Make due_time timezone-aware if it's naive
             due = o.due_time
-            if due is not None and timezone.is_naive(due):
-                due = timezone.make_aware(due)
+            # Convert aware datetime to naive if needed
+            if due is not None and hasattr(due, 'tzinfo') and due.tzinfo is not None:
+                due = due.replace(tzinfo=None)
             due_times[mid] = due
 
-    # Use timezone-aware start time
-    start_time = timezone.now()
+    # Use naive local time for start
+    start_time = datetime.now()
 
     is_feasible, route, details = validate_route_feasibility(destination_ids, due_times, start_time)
 
@@ -355,7 +356,6 @@ def api_accept_orders(request):
         o.save()
 
     return JsonResponse({'success': True, 'route': route, 'details': details})
-
 
 # ==================== API: update_status ====================
 @login_required
