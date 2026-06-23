@@ -1,0 +1,105 @@
+{% extends 'base.html' %}
+{% block title %}Courier Dashboard - SwiftDeliver{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h2 style="margin-bottom:1.5rem;"><i class="fas fa-box" style="color:var(--primary);"></i> Available Orders</h2>
+    <div class="grid grid-3" id="availableList">
+        {% for o in available_orders %}
+        <div class="glass card" style="position:relative;">
+            <div style="position:absolute;top:1rem;right:1rem;">
+                <input type="checkbox" class="order-check" value="{{ o.id }}" style="width:20px;height:20px;cursor:pointer;">
+            </div>
+            <h3>Order #{{ o.id }}</h3>
+            <p><i class="fas fa-store"></i> {{ o.merchant.username }}</p>
+            <p><i class="fas fa-map-marker-alt" style="color:var(--primary);"></i> {{ o.destination.address }}</p>
+            <p><i class="fas fa-clock" style="color:var(--secondary);"></i> Due: {{ o.due_time|default:"N/A" }}</p>
+        </div>
+        {% empty %}
+        <p style="color:var(--text-light);">No available orders right now.</p>
+        {% endfor %}
+    </div>
+
+    <div style="margin: 1.5rem 0; text-align: right;">
+        <button class="btn btn-primary" id="acceptSelectedBtn">
+            <i class="fas fa-check"></i> Accept Selected Orders
+        </button>
+    </div>
+
+    <h2 style="margin: 2.5rem 0 1.5rem;"><i class="fas fa-route" style="color:var(--secondary);"></i> My Deliveries</h2>
+    <div class="glass table-wrap">
+        <table>
+            <thead>
+                <tr><th>Order #</th><th>Destination</th><th>Status</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="myDeliveriesTable">
+                {% for o in my_orders %}
+                <tr>
+                    <td>#{{ o.id }}</td>
+                    <td>{{ o.destination.address }}</td>
+                    <td><span class="badge badge-{{ o.status|lower }}">{{ o.status }}</span></td>
+                    <td>
+                        {% if o.status == 'ACCEPTED' %}
+                        <button class="btn btn-sm btn-secondary btn-start-delivery" data-order-id="{{ o.id }}">Start</button>
+                        {% elif o.status == 'OUT_FOR_DELIVERY' %}
+                        <button class="btn btn-sm btn-primary btn-mark-delivered" data-order-id="{{ o.id }}">Mark Delivered</button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="4" style="text-align:center;color:var(--text-light);">No active deliveries.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div style="margin-top:1.5rem;">
+        <a href="{% url 'courier_map' %}" class="btn btn-secondary"><i class="fas fa-map"></i> Open Route Map</a>
+    </div>
+</div>
+
+<script>
+    /* ==================== JS: Accept Selected Orders Button ==================== */
+    document.getElementById('acceptSelectedBtn').addEventListener('click', async function() {
+        const checked = Array.from(document.querySelectorAll('.order-check:checked')).map(function(cb) {
+            return parseInt(cb.value);
+        });
+        if (checked.length === 0) {
+            showToast('Select at least one order.', 'error');
+            return;
+        }
+
+        const data = await fetchAPI("{% url 'api_accept_orders' %}", 'POST', {order_ids: checked});
+        if (data.success) {
+            showToast('Orders accepted! Route optimized.', 'success');
+            setTimeout(function() { location.reload(); }, 800);
+        } else {
+            showToast(data.error, 'error');
+        }
+    });
+
+    /* ==================== JS: Start Delivery Button Delegation ==================== */
+    document.getElementById('myDeliveriesTable').addEventListener('click', async function(e) {
+        if (e.target.classList.contains('btn-start-delivery')) {
+            const orderId = e.target.getAttribute('data-order-id');
+            const data = await fetchAPI("{% url 'api_update_status' %}", 'POST', {order_id: parseInt(orderId), status: 'OUT_FOR_DELIVERY'});
+            if (data.success) {
+                showToast('Delivery started!', 'success');
+                setTimeout(function() { location.reload(); }, 600);
+            }
+        }
+    });
+
+    /* ==================== JS: Mark Delivered Button Delegation ==================== */
+    document.getElementById('myDeliveriesTable').addEventListener('click', async function(e) {
+        if (e.target.classList.contains('btn-mark-delivered')) {
+            const orderId = e.target.getAttribute('data-order-id');
+            const data = await fetchAPI("{% url 'api_update_status' %}", 'POST', {order_id: parseInt(orderId), status: 'DELIVERED'});
+            if (data.success) {
+                showToast('Order marked as delivered!', 'success');
+                setTimeout(function() { location.reload(); }, 600);
+            }
+        }
+    });
+</script>
+{% endblock %}

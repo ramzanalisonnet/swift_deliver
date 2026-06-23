@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}SwiftDeliver{% endblock %}</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ==================== CSS: Design Tokens ==================== */
+        :root {
+            --primary: #e67e22;
+            --primary-dark: #d35400;
+            --secondary: #1abc9c;
+            --secondary-dark: #16a085;
+            --bg-warm: #fdf6e3;
+            --bg-gradient: linear-gradient(135deg, #fff5e6 0%, #e0f7fa 100%);
+            --glass: rgba(255, 255, 255, 0.65);
+            --glass-border: rgba(255, 255, 255, 0.4);
+            --text: #2c3e50;
+            --text-light: #546e7a;
+            --shadow: 0 8px 32px rgba(0,0,0,0.08);
+            --radius: 16px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg-gradient);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        /* ==================== CSS: Glassmorphism Utilities ==================== */
+        .glass {
+            background: var(--glass);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+        }
+
+        /* ==================== CSS: Navigation ==================== */
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 2rem;
+            background: rgba(255,255,255,0.8);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--glass-border);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+        .navbar .brand {
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: var(--primary-dark);
+            letter-spacing: -0.5px;
+        }
+        .navbar .brand i { margin-right: 0.5rem; color: var(--secondary); }
+        .nav-links { display: flex; gap: 1.5rem; align-items: center; }
+        .nav-links a, .nav-links button {
+            text-decoration: none;
+            color: var(--text);
+            font-weight: 600;
+            font-size: 0.95rem;
+            background: none;
+            border: none;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        .nav-links a:hover, .nav-links button:hover { color: var(--primary); }
+        .btn-logout {
+            background: var(--primary) !important;
+            color: #fff !important;
+            padding: 0.5rem 1.2rem;
+            border-radius: 50px !important;
+            box-shadow: 0 4px 12px rgba(230,126,34,0.3);
+        }
+        .btn-logout:hover { background: var(--primary-dark) !important; }
+
+        /* ==================== CSS: Layout ==================== */
+        .container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 1.5rem;
+        }
+        .grid { display: grid; gap: 1.5rem; }
+        .grid-2 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+        .grid-3 { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+        .grid-4 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+
+        /* ==================== CSS: Cards ==================== */
+        .card {
+            padding: 1.5rem;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .card:hover { transform: translateY(-4px); box-shadow: 0 12px 40px rgba(0,0,0,0.12); }
+        .card h3 { font-size: 1.1rem; margin-bottom: 0.5rem; color: var(--primary-dark); }
+        .card p { color: var(--text-light); font-size: 0.9rem; }
+
+        /* ==================== CSS: Buttons ==================== */
+        .btn {
+            display: inline-flex; align-items: center; gap: 0.5rem;
+            padding: 0.7rem 1.4rem; border: none; border-radius: 12px;
+            font-weight: 700; font-size: 0.9rem; cursor: pointer;
+            transition: all 0.2s; text-decoration: none;
+        }
+        .btn-primary { background: var(--primary); color: #fff; box-shadow: 0 4px 12px rgba(230,126,34,0.3); }
+        .btn-primary:hover { background: var(--primary-dark); transform: translateY(-2px); }
+        .btn-secondary { background: var(--secondary); color: #fff; box-shadow: 0 4px 12px rgba(26,188,156,0.3); }
+        .btn-secondary:hover { background: var(--secondary-dark); }
+        .btn-outline { background: transparent; border: 2px solid var(--primary); color: var(--primary); }
+        .btn-outline:hover { background: var(--primary); color: #fff; }
+        .btn-sm { padding: 0.4rem 0.9rem; font-size: 0.8rem; border-radius: 8px; }
+
+        /* ==================== CSS: Forms ==================== */
+        .form-group { margin-bottom: 1.2rem; }
+        .form-group label { display: block; margin-bottom: 0.4rem; font-weight: 600; font-size: 0.9rem; }
+        .form-control {
+            width: 100%; padding: 0.75rem 1rem;
+            border: 1px solid rgba(0,0,0,0.1); border-radius: 12px;
+            background: rgba(255,255,255,0.7);
+            font-size: 0.95rem; transition: border 0.2s;
+        }
+        .form-control:focus { outline: none; border-color: var(--secondary); background: #fff; }
+
+        /* ==================== CSS: Tables ==================== */
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 0.9rem 1rem; text-align: left; font-size: 0.9rem; }
+        th { background: rgba(230,126,34,0.1); color: var(--primary-dark); font-weight: 700; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; }
+        tr { border-bottom: 1px solid rgba(0,0,0,0.05); }
+        tr:hover { background: rgba(255,255,255,0.5); }
+        .badge {
+            display: inline-block; padding: 0.25rem 0.7rem;
+            border-radius: 50px; font-size: 0.75rem; font-weight: 700;
+        }
+        .badge-pending { background: #fff3cd; color: #856404; }
+        .badge-accepted { background: #d1ecf1; color: #0c5460; }
+        .badge-out { background: #cce5ff; color: #004085; }
+        .badge-delivered { background: #d4edda; color: #155724; }
+
+        /* ==================== CSS: Toast Notifications ==================== */
+        #toast-container {
+            position: fixed; top: 1.5rem; right: 1.5rem;
+            z-index: 9999; display: flex; flex-direction: column; gap: 0.75rem;
+        }
+        .toast {
+            padding: 1rem 1.5rem; border-radius: 12px;
+            color: #fff; font-weight: 600; box-shadow: var(--shadow);
+            animation: slideIn 0.3s ease, fadeOut 0.3s ease 2.7s forwards;
+            min-width: 260px;
+        }
+        .toast.success { background: var(--secondary); }
+        .toast.error { background: #e74c3c; }
+        @keyframes slideIn { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes fadeOut { to { opacity: 0; transform: translateX(120%); } }
+
+        /* ==================== CSS: Spinner ==================== */
+        .spinner {
+            width: 24px; height: 24px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top-color: #fff; border-radius: 50%;
+            animation: spin 0.8s linear infinite; display: inline-block;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ==================== CSS: Responsive ==================== */
+        @media (max-width: 768px) {
+            .navbar { padding: 1rem; }
+            .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+            .container { margin: 1rem auto; padding: 0 1rem; }
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    {% if user.is_authenticated %}
+    <nav class="navbar">
+        <div class="brand"><i class="fas fa-shipping-fast"></i>SwiftDeliver</div>
+        <div class="nav-links">
+            <span style="color:var(--text-light);font-size:0.9rem;">
+                <i class="fas fa-user-circle"></i> {{ user.username }} ({{ user.userprofile.role }})
+            </span>
+            <form method="post" action="{% url 'logout' %}" style="display:inline;">
+                {% csrf_token %}
+                <button type="submit" class="btn-logout"><i class="fas fa-sign-out-alt"></i> Logout</button>
+            </form>
+        </div>
+    </nav>
+    {% endif %}
+
+    <div id="toast-container"></div>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <script>
+        /* ==================== JS: Toast Notification System ==================== */
+        function showToast(message, type='success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        /* ==================== JS: Generic Fetch Helper ==================== */
+        async function fetchAPI(url, method='GET', data=null) {
+            const opts = { method, headers: {} };
+            if (data) {
+                opts.headers['Content-Type'] = 'application/json';
+                opts.headers['X-CSRFToken'] = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+                opts.body = JSON.stringify(data);
+            }
+            const res = await fetch(url, opts);
+            return res.json();
+        }
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

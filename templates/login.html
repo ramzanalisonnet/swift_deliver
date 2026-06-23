@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+{% block title %}Login - SwiftDeliver{% endblock %}
+
+{% block content %}
+<style>
+    .split-screen {
+        display: grid; grid-template-columns: 1fr 1fr;
+        min-height: 100vh;
+    }
+    .brand-side {
+        background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+        display: flex; flex-direction: column; justify-content: center; align-items: center;
+        color: #fff; padding: 2rem; text-align: center;
+    }
+    .brand-side h1 { font-size: 3rem; margin-bottom: 1rem; }
+    .brand-side p { font-size: 1.1rem; opacity: 0.9; max-width: 400px; }
+    .form-side {
+        display: flex; justify-content: center; align-items: center;
+        padding: 2rem; background: var(--bg-gradient);
+    }
+    .login-card {
+        width: 100%; max-width: 420px; padding: 2.5rem;
+    }
+    .login-card h2 { margin-bottom: 0.25rem; color: var(--primary-dark); }
+    .login-card .subtitle { color: var(--text-light); margin-bottom: 1.5rem; font-size: 0.9rem; }
+    .login-footer { text-align: center; margin-top: 1.5rem; font-size: 0.9rem; }
+    .login-footer a { color: var(--primary); font-weight: 700; text-decoration: none; }
+
+    @media (max-width: 768px) {
+        .split-screen { grid-template-columns: 1fr; }
+        .brand-side { min-height: 200px; padding: 2rem 1rem; }
+        .brand-side h1 { font-size: 2rem; }
+    }
+</style>
+
+<div class="split-screen">
+    <div class="brand-side">
+        <h1><i class="fas fa-shipping-fast"></i> SwiftDeliver</h1>
+        <p>Modern logistics and delivery management. Fast, reliable, and beautifully simple.</p>
+    </div>
+    <div class="form-side">
+        <div class="glass login-card">
+            <h2>Welcome Back</h2>
+            <p class="subtitle">Sign in to your account to continue</p>
+            <form id="loginForm">
+                {% csrf_token %}
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" name="username" class="form-control" placeholder="Enter username" required>
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" name="password" class="form-control" placeholder="Enter password" required>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">
+                    <span id="loginText">Sign In</span>
+                    <span id="loginSpinner" class="spinner" style="display:none;margin-left:8px;"></span>
+                </button>
+            </form>
+            <div class="login-footer">
+                Don't have an account? <a href="{% url 'register' %}">Create one</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    /* ==================== JS: Login Handler ==================== */
+    document.getElementById('loginForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const btnText = document.getElementById('loginText');
+        const spinner = document.getElementById('loginSpinner');
+        btnText.textContent = 'Signing in...';
+        spinner.style.display = 'inline-block';
+
+        const formData = new FormData(this);
+        const res = await fetch("{% url 'login' %}", {
+            method: 'POST',
+            body: formData,
+            headers: {'X-CSRFToken': formData.get('csrfmiddlewaretoken')}
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Login successful!', 'success');
+            setTimeout(() => window.location.href = data.redirect, 600);
+        } else {
+            showToast(data.error, 'error');
+            btnText.textContent = 'Sign In';
+            spinner.style.display = 'none';
+        }
+    });
+</script>
+{% endblock %}

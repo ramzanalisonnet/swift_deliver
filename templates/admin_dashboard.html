@@ -1,0 +1,139 @@
+{% extends 'base.html' %}
+{% block title %}Admin Dashboard - SwiftDeliver{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- User Management -->
+    <h2 style="margin-bottom:1.5rem;"><i class="fas fa-users" style="color:var(--primary);"></i> User Management</h2>
+    <div class="glass table-wrap" style="margin-bottom:2.5rem;">
+        <table>
+            <thead>
+                <tr><th>ID</th><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Action</th></tr>
+            </thead>
+            <tbody id="userTableBody">
+                {% for u in users %}
+                <tr>
+                    <td>{{ u.id }}</td>
+                    <td>{{ u.username }}</td>
+                    <td>{{ u.email }}</td>
+                    <td>{{ u.userprofile.role }}</td>
+                    <td>{% if u.userprofile.is_approved %}<span class="badge badge-delivered">Active</span>{% else %}<span class="badge badge-pending">Pending</span>{% endif %}</td>
+                    <td>
+                        {% if not u.userprofile.is_approved and u.userprofile.role != 'CUSTOMER' %}
+                        <button class="btn btn-sm btn-primary btn-approve" data-user-id="{{ u.id }}">Approve</button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Transfer Ownership -->
+    <div class="glass card" style="max-width:600px;margin-bottom:2.5rem;">
+        <h3><i class="fas fa-exchange-alt" style="color:var(--secondary);"></i> Transfer Role / Ownership</h3>
+        <div style="display:flex;gap:1rem;margin-top:1rem;flex-wrap:wrap;">
+            <select id="transferUser" class="form-control" style="flex:1;min-width:200px;">
+                {% for u in users %}
+                <option value="{{ u.id }}">{{ u.username }} ({{ u.userprofile.role }})</option>
+                {% endfor %}
+            </select>
+            <select id="transferRole" class="form-control" style="flex:1;min-width:200px;">
+                {% for r in roles %}
+                <option value="{{ r.0 }}">{{ r.1 }}</option>
+                {% endfor %}
+            </select>
+            <button class="btn btn-secondary" id="btnTransfer">Transfer</button>
+        </div>
+    </div>
+
+    <!-- Order Management -->
+    <h2 style="margin-bottom:1.5rem;"><i class="fas fa-clipboard-list" style="color:var(--secondary);"></i> Order Management</h2>
+    <div class="glass table-wrap">
+        <table>
+            <thead>
+                <tr><th>Order #</th><th>Customer</th><th>Merchant</th><th>Courier</th><th>Destination</th><th>Status</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="adminOrderTable">
+                {% for o in orders %}
+                <tr>
+                    <td>#{{ o.id }}</td>
+                    <td>{{ o.customer.username }}</td>
+                    <td>{{ o.merchant.username }}</td>
+                    <td>{{ o.courier.username|default:"—" }}</td>
+                    <td>{{ o.destination.address }}</td>
+                    <td>
+                        <select class="form-control order-status-select" data-order-id="{{ o.id }}" style="min-width:140px;">
+                            <option value="PENDING" {% if o.status == 'PENDING' %}selected{% endif %}>Pending Courier</option>
+                            <option value="ACCEPTED" {% if o.status == 'ACCEPTED' %}selected{% endif %}>Accepted</option>
+                            <option value="OUT_FOR_DELIVERY" {% if o.status == 'OUT_FOR_DELIVERY' %}selected{% endif %}>Out for Delivery</option>
+                            <option value="DELIVERED" {% if o.status == 'DELIVERED' %}selected{% endif %}>Delivered</option>
+                            <option value="CANCELLED" {% if o.status == 'CANCELLED' %}selected{% endif %}>Cancelled</option>
+                        </select>
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-outline btn-delete-order" data-order-id="{{ o.id }}" style="border-color:#e74c3c;color:#e74c3c;">Delete</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    /* ==================== JS: Admin Approve User ==================== */
+    document.getElementById('userTableBody').addEventListener('click', async function(e) {
+        if (e.target.classList.contains('btn-approve')) {
+            const userId = e.target.getAttribute('data-user-id');
+            const data = await fetchAPI("{% url 'api_approve_user' %}", 'POST', {user_id: parseInt(userId)});
+            if (data.success) {
+                showToast('User approved successfully.', 'success');
+                setTimeout(function() { location.reload(); }, 600);
+            } else {
+                showToast('Approval failed.', 'error');
+            }
+        }
+    });
+
+    /* ==================== JS: Admin Transfer Role ==================== */
+    document.getElementById('btnTransfer').addEventListener('click', async function() {
+        const userId = document.getElementById('transferUser').value;
+        const newRole = document.getElementById('transferRole').value;
+        const data = await fetchAPI("{% url 'api_transfer_role' %}", 'POST', {user_id: parseInt(userId), new_role: newRole});
+        if (data.success) {
+            showToast('Role transferred successfully.', 'success');
+            setTimeout(function() { location.reload(); }, 600);
+        } else {
+            showToast('Transfer failed.', 'error');
+        }
+    });
+
+    /* ==================== JS: Admin Update Order Status ==================== */
+    document.getElementById('adminOrderTable').addEventListener('change', async function(e) {
+        if (e.target.classList.contains('order-status-select')) {
+            const orderId = e.target.getAttribute('data-order-id');
+            const status = e.target.value;
+            const data = await fetchAPI("{% url 'api_admin_update_order' %}", 'POST', {order_id: parseInt(orderId), status: status});
+            if (data.success) {
+                showToast('Status updated.', 'success');
+            } else {
+                showToast('Update failed.', 'error');
+            }
+        }
+    });
+
+    /* ==================== JS: Admin Delete Order ==================== */
+    document.getElementById('adminOrderTable').addEventListener('click', async function(e) {
+        if (e.target.classList.contains('btn-delete-order')) {
+            if (!confirm('Are you sure you want to delete this order?')) return;
+            const orderId = e.target.getAttribute('data-order-id');
+            const data = await fetchAPI("{% url 'api_admin_update_order' %}", 'POST', {order_id: parseInt(orderId), action: 'delete'});
+            if (data.success) {
+                showToast('Order deleted.', 'success');
+                setTimeout(function() { location.reload(); }, 600);
+            }
+        }
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,229 @@
+{% extends 'base.html' %}
+{% block title %}Merchant Dashboard - SwiftDeliver{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="grid grid-2">
+        <!-- Add Menu Item Card -->
+        <div class="glass card">
+            <h2><i class="fas fa-utensils" style="color:var(--primary);"></i> Add Menu Item</h2>
+            <p style="color:var(--text-light);font-size:0.9rem;margin-bottom:1rem;">Add food items that customers can order.</p>
+            <form id="menuItemForm">
+                {% csrf_token %}
+                <div class="form-group">
+                    <label>Item Name</label>
+                    <input type="text" id="itemName" class="form-control" placeholder="e.g., Chicken Burger" required>
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="itemDesc" class="form-control" rows="2" placeholder="Brief description..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Price ($)</label>
+                    <input type="number" id="itemPrice" class="form-control" step="0.01" min="0.01" placeholder="9.99" required>
+                </div>
+                <button type="submit" class="btn btn-primary">
+                    <span id="menuBtnText">Add Item</span>
+                    <span id="menuSpinner" class="spinner" style="display:none;margin-left:8px;"></span>
+                </button>
+            </form>
+        </div>
+
+        <!-- Create Delivery Order Card -->
+        <div class="glass card">
+            <h2><i class="fas fa-plus-circle" style="color:var(--secondary);"></i> Create Delivery Order</h2>
+            <p style="color:var(--text-light);font-size:0.9rem;margin-bottom:1rem;">Create an order with items for courier delivery.</p>
+            <form id="merchantOrderForm">
+                {% csrf_token %}
+                
+                <!-- Item Selection -->
+                <div class="form-group">
+                    <label>Select Items & Quantities</label>
+                    <div id="orderItemsList" style="max-height:200px;overflow-y:auto;">
+                        {% for item in menu_items %}
+                        <div class="order-item-row" data-item-id="{{ item.id }}" data-item-price="{{ item.price }}" data-item-name="{{ item.name }}" style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem;border-bottom:1px solid rgba(0,0,0,0.05);">
+                            <div>
+                                <strong>{{ item.name }}</strong>
+                                <span style="color:var(--text-light);font-size:0.85rem;"> - ${{ item.price }}</span>
+                            </div>
+                            <div style="display:flex;align-items:center;gap:0.5rem;">
+                                <button type="button" class="btn btn-sm btn-outline btn-qty-minus">-</button>
+                                <input type="number" class="qty-input" value="0" readonly style="width:40px;text-align:center;border:none;background:transparent;font-weight:700;">
+                                <button type="button" class="btn btn-sm btn-primary btn-qty-plus">+</button>
+                            </div>
+                        </div>
+                        {% empty %}
+                        <p style="color:var(--text-light);font-size:0.9rem;">No menu items. Add items above first.</p>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Delivery Destination</label>
+                    <select id="mDestination" class="form-control">
+                        {% for loc in locations %}
+                        <option value="{{ loc.id }}">{{ loc.name }} - {{ loc.address }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Required Due Time</label>
+                    <input type="datetime-local" id="mDueTime" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Notes</label>
+                    <textarea id="mNotes" class="form-control" rows="2" placeholder="Special instructions..."></textarea>
+                </div>
+                
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <strong style="color:var(--primary-dark);">Total: $<span id="orderTotal">0.00</span></strong>
+                    <button type="submit" class="btn btn-secondary">
+                        <span id="mBtnText">Place Order</span>
+                        <span id="mSpinner" class="spinner" style="display:none;margin-left:8px;"></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- My Menu Items -->
+    <h2 style="margin: 2.5rem 0 1.5rem;"><i class="fas fa-list" style="color:var(--primary);"></i> My Menu</h2>
+    <div class="grid grid-4" id="menuItemsList">
+        {% for item in menu_items %}
+        <div class="glass card">
+            <h4>{{ item.name }}</h4>
+            <p style="font-size:0.85rem;color:var(--text-light);">{{ item.description }}</p>
+            <strong style="color:var(--primary-dark);font-size:1.1rem;">${{ item.price }}</strong>
+        </div>
+        {% empty %}
+        <p style="color:var(--text-light);grid-column:1/-1;">No menu items yet. Add your first item above!</p>
+        {% endfor %}
+    </div>
+
+    <!-- My Orders -->
+    <h2 style="margin: 2.5rem 0 1.5rem;"><i class="fas fa-clipboard-list" style="color:var(--secondary);"></i> My Orders</h2>
+    <div class="glass table-wrap">
+        <table>
+            <thead>
+                <tr><th>Order #</th><th>Destination</th><th>Due Time</th><th>Status</th><th>Items</th><th>Courier</th></tr>
+            </thead>
+            <tbody id="merchantOrderTable">
+                {% for o in orders %}
+                <tr>
+                    <td>#{{ o.id }}</td>
+                    <td>{{ o.destination.address }}</td>
+                    <td>{{ o.due_time|default:"N/A" }}</td>
+                    <td><span class="badge badge-{{ o.status|lower }}">{{ o.status }}</span></td>
+                    <td>{{ o.items.count }} item(s)</td>
+                    <td>{{ o.courier.username|default:"Unassigned" }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" style="text-align:center;color:var(--text-light);">No orders yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    /* ==================== JS: Add Menu Item Handler ==================== */
+    document.getElementById('menuItemForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        document.getElementById('menuBtnText').textContent = 'Adding...';
+        document.getElementById('menuSpinner').style.display = 'inline-block';
+
+        const payload = {
+            name: document.getElementById('itemName').value,
+            description: document.getElementById('itemDesc').value,
+            price: parseFloat(document.getElementById('itemPrice').value)
+        };
+
+        const data = await fetchAPI("{% url 'api_add_menu_item' %}", 'POST', payload);
+        if (data.success) {
+            showToast('Menu item "' + data.name + '" added!', 'success');
+            document.getElementById('menuItemForm').reset();
+            setTimeout(function() { location.reload(); }, 600);
+        } else {
+            showToast(data.error, 'error');
+            document.getElementById('menuBtnText').textContent = 'Add Item';
+            document.getElementById('menuSpinner').style.display = 'none';
+        }
+    });
+
+    /* ==================== JS: Merchant Order Item Quantity Logic ==================== */
+    const itemPrices = {};
+    const orderCart = {};
+    
+    // Build itemPrices from data attributes (NO Django template syntax in JS)
+    document.querySelectorAll('.order-item-row').forEach(function(row) {
+        const itemId = parseInt(row.getAttribute('data-item-id'));
+        const itemPrice = parseFloat(row.getAttribute('data-item-price'));
+        itemPrices[itemId] = itemPrice;
+        orderCart[itemId] = 0;
+    });
+
+    function updateOrderTotal() {
+        let total = 0;
+        Object.keys(orderCart).forEach(function(id) {
+            total += itemPrices[id] * orderCart[id];
+        });
+        document.getElementById('orderTotal').textContent = total.toFixed(2);
+    }
+
+    document.getElementById('orderItemsList').addEventListener('click', function(e) {
+        const btn = e.target;
+        if (!btn.classList.contains('btn-qty-minus') && !btn.classList.contains('btn-qty-plus')) return;
+        
+        const row = btn.closest('.order-item-row');
+        if (!row) return;
+        
+        const itemId = parseInt(row.getAttribute('data-item-id'));
+        const input = row.querySelector('.qty-input');
+        
+        if (btn.classList.contains('btn-qty-minus')) {
+            orderCart[itemId] = Math.max(0, orderCart[itemId] - 1);
+        } else {
+            orderCart[itemId] = orderCart[itemId] + 1;
+        }
+        
+        input.value = orderCart[itemId];
+        updateOrderTotal();
+    });
+
+    /* ==================== JS: Merchant Order Creation with Items ==================== */
+    document.getElementById('merchantOrderForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const items = Object.keys(orderCart).filter(function(id) {
+            return orderCart[id] > 0;
+        }).map(function(id) {
+            return {id: parseInt(id), quantity: orderCart[id]};
+        });
+        
+        if (items.length === 0) {
+            showToast('Please select at least one item.', 'error');
+            return;
+        }
+
+        document.getElementById('mBtnText').textContent = 'Placing...';
+        document.getElementById('mSpinner').style.display = 'inline-block';
+
+        const payload = {
+            destination_id: parseInt(document.getElementById('mDestination').value),
+            due_time: document.getElementById('mDueTime').value,
+            notes: document.getElementById('mNotes').value,
+            items: items
+        };
+
+        const data = await fetchAPI("{% url 'api_merchant_create_order' %}", 'POST', payload);
+        if (data.success) {
+            showToast('Order #' + data.order_id + ' placed successfully!', 'success');
+            setTimeout(function() { location.reload(); }, 600);
+        } else {
+            showToast('Failed to place order.', 'error');
+            document.getElementById('mBtnText').textContent = 'Place Order';
+            document.getElementById('mSpinner').style.display = 'none';
+        }
+    });
+</script>
+{% endblock %}

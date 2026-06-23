@@ -1,0 +1,197 @@
+{% extends 'base.html' %}
+{% block title %}Customer Dashboard - SwiftDeliver{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h2 style="margin-bottom:1.5rem;"><i class="fas fa-utensils" style="color:var(--primary);"></i> Restaurants</h2>
+    <div class="grid grid-3" id="merchantList">
+        {% for m in merchants %}
+        <div class="glass card merchant-card" data-merchant-id="{{ m.id }}" data-merchant-name="{{ m.username }}" style="cursor:pointer;">
+            <h3><i class="fas fa-store"></i> {{ m.username }}</h3>
+            <p>{{ m.email }}</p>
+            <span class="btn btn-sm btn-secondary" style="margin-top:0.75rem;">View Menu</span>
+        </div>
+        {% empty %}
+        <p>No restaurants available.</p>
+        {% endfor %}
+    </div>
+
+    <h2 style="margin: 2.5rem 0 1.5rem;"><i class="fas fa-history" style="color:var(--secondary);"></i> My Orders</h2>
+    <div class="glass table-wrap">
+        <table>
+            <thead>
+                <tr><th>Order #</th><th>Merchant</th><th>Status</th><th>Due Time</th><th>Items</th></tr>
+            </thead>
+            <tbody id="orderTableBody">
+                {% for o in orders %}
+                <tr>
+                    <td>#{{ o.id }}</td>
+                    <td>{{ o.merchant.username }}</td>
+                    <td><span class="badge badge-{{ o.status|lower }}">{{ o.status }}</span></td>
+                    <td>{{ o.due_time|default:"N/A" }}</td>
+                    <td>{{ o.items.count }} item(s)</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="5" style="text-align:center;color:var(--text-light);">No orders yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Menu Modal -->
+<div id="menuModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:2000;justify-content:center;align-items:center;padding:1rem;">
+    <div class="glass" style="width:100%;max-width:700px;max-height:90vh;overflow-y:auto;padding:2rem;position:relative;">
+        <button id="closeMenuBtn" style="position:absolute;top:1rem;right:1rem;background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--text-light);"><i class="fas fa-times"></i></button>
+        <h2 id="menuTitle" style="margin-bottom:1rem;color:var(--primary-dark);">Menu</h2>
+
+                <div class="form-group">
+            <label>Delivery Address</label>
+            <select id="deliveryAddress" class="form-control">
+                {% for loc in locations %}
+                <option value="{{ loc.id }}">{{ loc.name }} - {{ loc.address }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Required Due Time</label>
+            <input type="datetime-local" id="dueTime" class="form-control" required>
+        </div>
+
+        <div id="menuItems" class="grid grid-2" style="margin:1rem 0;"></div>
+
+        <div class="glass" style="padding:1.25rem;margin-top:1rem;background:rgba(230,126,34,0.08);">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <h3 style="margin:0;">Total: $<span id="cartTotal">0.00</span></h3>
+                <button class="btn btn-primary" id="placeOrderBtn">
+                    <i class="fas fa-shopping-cart"></i> Place Order
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    /* ==================== JS: Merchant Card Click Handler ==================== */
+    document.getElementById('merchantList').addEventListener('click', function(e) {
+        const card = e.target.closest('.merchant-card');
+        if (!card) return;
+        const merchantId = card.getAttribute('data-merchant-id');
+        const merchantName = card.getAttribute('data-merchant-name');
+        openMenu(parseInt(merchantId), merchantName);
+    });
+
+    /* ==================== JS: Close Menu Button Handler ==================== */
+    document.getElementById('closeMenuBtn').addEventListener('click', closeMenu);
+
+    /* ==================== JS: Place Order Button Handler ==================== */
+    document.getElementById('placeOrderBtn').addEventListener('click', placeOrder);
+
+    /* ==================== JS: Customer Menu & Cart Logic ==================== */
+    let currentMerchantId = null;
+    let cart = {};
+
+    function openMenu(merchantId, merchantName) {
+        currentMerchantId = merchantId;
+        document.getElementById('menuTitle').textContent = merchantName + ' - Menu';
+        document.getElementById('menuModal').style.display = 'flex';
+        document.getElementById('menuItems').innerHTML = '<p style="text-align:center;color:var(--text-light);">Loading...</p>';
+        cart = {};
+        updateTotal();
+
+        fetch("{% url 'api_menu' 0 %}".replace('0', merchantId))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                const container = document.getElementById('menuItems');
+                container.innerHTML = '';
+                data.items.forEach(function(item) {
+                    const div = document.createElement('div');
+                    div.className = 'glass card menu-item-card';
+                    div.setAttribute('data-item-id', item.id);
+                    div.style.padding = '1rem';
+                    div.innerHTML =
+                        '<h4>' + item.name + '</h4>' +
+                        '<p style="font-size:0.85rem;color:var(--text-light);">' + item.description + '</p>' +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.5rem;">' +
+                            '<strong style="color:var(--primary-dark);">$' + item.price.toFixed(2) + '</strong>' +
+                            '<div style="display:flex;align-items:center;gap:0.5rem;">' +
+                                '<button class="btn btn-sm btn-outline btn-qty-minus">-</button>' +
+                                '<input type="number" class="qty-input" value="0" readonly style="width:40px;text-align:center;border:none;background:transparent;font-weight:700;">' +
+                                '<button class="btn btn-sm btn-primary btn-qty-plus">+</button>' +
+                            '</div>' +
+                        '</div>';
+                    container.appendChild(div);
+                    cart[item.id] = {item: item, quantity: 0};
+                });
+            });
+    }
+
+    function closeMenu() {
+        document.getElementById('menuModal').style.display = 'none';
+    }
+
+    /* ==================== JS: Quantity Button Delegation ==================== */
+    document.getElementById('menuItems').addEventListener('click', function(e) {
+        const card = e.target.closest('.menu-item-card');
+        if (!card) return;
+        const itemId = parseInt(card.getAttribute('data-item-id'));
+        if (e.target.classList.contains('btn-qty-minus')) {
+            updateQty(itemId, -1);
+        } else if (e.target.classList.contains('btn-qty-plus')) {
+            updateQty(itemId, 1);
+        }
+    });
+
+    function updateQty(itemId, delta) {
+        if (!cart[itemId]) return;
+        cart[itemId].quantity = Math.max(0, cart[itemId].quantity + delta);
+        const card = document.querySelector('.menu-item-card[data-item-id="' + itemId + '"]');
+        if (card) {
+            card.querySelector('.qty-input').value = cart[itemId].quantity;
+        }
+        updateTotal();
+    }
+
+    function updateTotal() {
+        let total = 0;
+        Object.values(cart).forEach(function(c) {
+            total += c.item.price * c.quantity;
+        });
+        document.getElementById('cartTotal').textContent = total.toFixed(2);
+    }
+
+    async function placeOrder() {
+        const items = Object.values(cart).filter(function(c) {
+            return c.quantity > 0;
+        }).map(function(c) {
+            return {id: c.item.id, quantity: c.quantity};
+        });
+        if (items.length === 0) {
+            showToast('Please add items to your cart.', 'error');
+            return;
+        }
+
+                const destinationId = document.getElementById('deliveryAddress').value;
+        const dueTime = document.getElementById('dueTime').value;
+        if (!dueTime) {
+            showToast('Please select a due time.', 'error');
+            return;
+        }
+        
+        const payload = {
+            merchant_id: currentMerchantId,
+            items: items,
+            destination_id: parseInt(destinationId),
+            due_time: dueTime
+        };
+        const data = await fetchAPI("{% url 'api_place_order' %}", 'POST', payload);
+        if (data.success) {
+            showToast('Order #' + data.order_id + ' placed! Total: $' + data.total, 'success');
+            closeMenu();
+            setTimeout(function() { location.reload(); }, 800);
+        } else {
+            showToast(data.error, 'error');
+        }
+    }
+</script>
+{% endblock %}

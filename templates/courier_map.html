@@ -1,0 +1,105 @@
+{% extends 'base.html' %}
+{% block title %}Delivery Route - SwiftDeliver{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h2 style="margin-bottom:1rem;"><i class="fas fa-map-marked-alt" style="color:var(--primary);"></i> Simulated Route Map</h2>
+    <div class="glass" style="padding:1rem;text-align:center;">
+        <canvas id="mapCanvas" width="800" height="600" style="max-width:100%;border-radius:12px;background:#eef2f5;"></canvas>
+        <div style="margin-top:1rem;display:flex;gap:1.5rem;justify-content:center;flex-wrap:wrap;font-size:0.85rem;">
+            <span><span style="display:inline-block;width:12px;height:12px;background:var(--primary);border-radius:50%;margin-right:4px;"></span> Restaurant</span>
+            <span><span style="display:inline-block;width:12px;height:12px;background:var(--secondary);border-radius:50%;margin-right:4px;"></span> Next Stop</span>
+            <span><span style="display:inline-block;width:12px;height:12px;background:#7f8c8d;border-radius:50%;margin-right:4px;"></span> Destination</span>
+        </div>
+    </div>
+    <div style="margin-top:1.5rem;">
+        <a href="{% url 'courier_dashboard' %}" class="btn btn-outline"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+    </div>
+</div>
+
+<script>
+    /* ==================== JS: Simulated Map Visualization ==================== */
+    const canvas = document.getElementById('mapCanvas');
+    const ctx = canvas.getContext('2d');
+    const NODE_RADIUS = 14;
+    let route = [];
+    let locations = [];
+    let pulseRadius = 0;
+
+    async function loadRoute() {
+        const res = await fetch("{% url 'api_courier_route' %}");
+        const data = await res.json();
+        if (!data.success) {
+            showToast(data.error, 'error');
+            return;
+        }
+        locations = data.locations;
+        route = data.route;
+        drawMap();
+        animatePulse();
+    }
+
+    function drawMap() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Draw all location nodes
+        locations.forEach(loc => {
+            const isRestaurant = loc.is_restaurant;
+            const inRoute = route.includes(loc.matrix_id);
+            const isNext = route.length > 0 && loc.matrix_id === route[1];
+
+            ctx.beginPath();
+            ctx.arc(loc.grid_x, loc.grid_y, NODE_RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = isRestaurant ? '#e67e22' : (isNext ? '#1abc9c' : (inRoute ? '#3498db' : '#7f8c8d'));
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+
+            // Labels
+            ctx.fillStyle = '#2c3e50';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(loc.name, loc.grid_x, loc.grid_y + 28);
+        });
+
+        // Draw route polyline
+        if (route.length > 1) {
+            ctx.beginPath();
+            ctx.strokeStyle = '#e67e22';
+            ctx.lineWidth = 4;
+            ctx.setLineDash([8, 6]);
+            const start = locations.find(l => l.matrix_id === route[0]);
+            ctx.moveTo(start.grid_x, start.grid_y);
+            for (let i = 1; i < route.length; i++) {
+                const pt = locations.find(l => l.matrix_id === route[i]);
+                ctx.lineTo(pt.grid_x, pt.grid_y);
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+    }
+
+    function animatePulse() {
+        if (route.length < 2) return;
+        const nextLoc = locations.find(l => l.matrix_id === route[1]);
+        if (!nextLoc) return;
+
+        pulseRadius += 0.5;
+        if (pulseRadius > 30) pulseRadius = 10;
+
+        drawMap();
+
+        // Pulse ring around next stop
+        ctx.beginPath();
+        ctx.arc(nextLoc.grid_x, nextLoc.grid_y, pulseRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(26, 188, 156, ${1 - pulseRadius/30})`;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        requestAnimationFrame(animatePulse);
+    }
+
+    loadRoute();
+</script>
+{% endblock %}
