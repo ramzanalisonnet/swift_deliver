@@ -86,6 +86,82 @@
         </div>
     </div>
 
+    <!-- Pending Orders (Need Merchant Acceptance) -->
+    <h2 style="margin: 2.5rem 0 1.5rem;"><i class="fas fa-bell" style="color:var(--primary);"></i> New Orders (Pending Approval)</h2>
+    <div class="glass table-wrap">
+        <table>
+            <thead>
+                <tr><th>Order #</th><th>Customer</th><th>Destination</th><th>Due Time</th><th>Items</th><th>Action</th></tr>
+            </thead>
+            <tbody>
+                {% for o in pending_orders %}
+                <tr>
+                    <td>#{{ o.id }}</td>
+                    <td>{{ o.customer.username }}</td>
+                    <td>{{ o.destination.address }}</td>
+                    <td>{{ o.due_time|default:"N/A" }}</td>
+                    <td>{{ o.items.count }} item(s)</td>
+                    <td>
+                        <button class="btn btn-sm btn-primary btn-accept-order" data-order-id="{{ o.id }}">Accept & Prepare</button>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" style="text-align:center;color:var(--text-light);">No pending orders.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Preparing Orders -->
+    <h2 style="margin: 2.5rem 0 1.5rem;"><i class="fas fa-fire" style="color:var(--secondary);"></i> Preparing</h2>
+    <div class="glass table-wrap">
+        <table>
+            <thead>
+                <tr><th>Order #</th><th>Customer</th><th>Destination</th><th>Due Time</th><th>Items</th><th>Action</th></tr>
+            </thead>
+            <tbody>
+                {% for o in preparing_orders %}
+                <tr>
+                    <td>#{{ o.id }}</td>
+                    <td>{{ o.customer.username }}</td>
+                    <td>{{ o.destination.address }}</td>
+                    <td>{{ o.due_time|default:"N/A" }}</td>
+                    <td>{{ o.items.count }} item(s)</td>
+                    <td>
+                        <button class="btn btn-sm btn-secondary btn-ready-pickup" data-order-id="{{ o.id }}">Ready for Pickup</button>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" style="text-align:center;color:var(--text-light);">No orders being prepared.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Ready for Pickup -->
+    <h2 style="margin: 2.5rem 0 1.5rem;"><i class="fas fa-box" style="color:#27ae60;"></i> Ready for Pickup</h2>
+    <div class="glass table-wrap">
+        <table>
+            <thead>
+                <tr><th>Order #</th><th>Customer</th><th>Destination</th><th>Due Time</th><th>Items</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+                {% for o in ready_orders %}
+                <tr>
+                    <td>#{{ o.id }}</td>
+                    <td>{{ o.customer.username }}</td>
+                    <td>{{ o.destination.address }}</td>
+                    <td>{{ o.due_time|default:"N/A" }}</td>
+                    <td>{{ o.items.count }} item(s)</td>
+                    <td><span class="badge badge-accepted">Waiting for Courier</span></td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" style="text-align:center;color:var(--text-light);">No orders ready for pickup.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
     <!-- My Menu Items -->
     <h2 style="margin: 2.5rem 0 1.5rem;"><i class="fas fa-list" style="color:var(--primary);"></i> My Menu</h2>
     <div class="grid grid-4" id="menuItemsList">
@@ -100,25 +176,24 @@
         {% endfor %}
     </div>
 
-    <!-- My Orders -->
-    <h2 style="margin: 2.5rem 0 1.5rem;"><i class="fas fa-clipboard-list" style="color:var(--secondary);"></i> My Orders</h2>
+    <!-- Past Orders -->
+    <h2 style="margin: 2.5rem 0 1.5rem;"><i class="fas fa-clipboard-list" style="color:var(--secondary);"></i> Past Orders</h2>
     <div class="glass table-wrap">
         <table>
             <thead>
-                <tr><th>Order #</th><th>Destination</th><th>Due Time</th><th>Status</th><th>Items</th><th>Courier</th></tr>
+                <tr><th>Order #</th><th>Customer</th><th>Destination</th><th>Status</th><th>Courier</th></tr>
             </thead>
-            <tbody id="merchantOrderTable">
-                {% for o in orders %}
+            <tbody>
+                {% for o in past_orders %}
                 <tr>
                     <td>#{{ o.id }}</td>
+                    <td>{{ o.customer.username }}</td>
                     <td>{{ o.destination.address }}</td>
-                    <td>{{ o.due_time|default:"N/A" }}</td>
-                    <td><span class="badge badge-{{ o.status|lower }}">{{ o.status }}</span></td>
-                    <td>{{ o.items.count }} item(s)</td>
+                    <td><span class="badge badge-pending">{{ o.status }}</span></td>
                     <td>{{ o.courier.username|default:"Unassigned" }}</td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="6" style="text-align:center;color:var(--text-light);">No orders yet.</td></tr>
+                <tr><td colspan="5" style="text-align:center;color:var(--text-light);">No past orders.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -150,11 +225,38 @@
         }
     });
 
+    /* ==================== JS: Merchant Accept Order Delegation ==================== */
+    document.addEventListener('click', async function(e) {
+        if (e.target.classList.contains('btn-accept-order')) {
+            const orderId = e.target.getAttribute('data-order-id');
+            const data = await fetchAPI("{% url 'api_merchant_accept_order' %}", 'POST', {order_id: parseInt(orderId)});
+            if (data.success) {
+                showToast(data.message, 'success');
+                setTimeout(function() { location.reload(); }, 600);
+            } else {
+                showToast(data.error, 'error');
+            }
+        }
+    });
+
+    /* ==================== JS: Merchant Ready for Pickup Delegation ==================== */
+    document.addEventListener('click', async function(e) {
+        if (e.target.classList.contains('btn-ready-pickup')) {
+            const orderId = e.target.getAttribute('data-order-id');
+            const data = await fetchAPI("{% url 'api_merchant_ready_for_pickup' %}", 'POST', {order_id: parseInt(orderId)});
+            if (data.success) {
+                showToast(data.message, 'success');
+                setTimeout(function() { location.reload(); }, 600);
+            } else {
+                showToast(data.error, 'error');
+            }
+        }
+    });
+
     /* ==================== JS: Merchant Order Item Quantity Logic ==================== */
     const itemPrices = {};
     const orderCart = {};
     
-    // Build itemPrices from data attributes (NO Django template syntax in JS)
     document.querySelectorAll('.order-item-row').forEach(function(row) {
         const itemId = parseInt(row.getAttribute('data-item-id'));
         const itemPrice = parseFloat(row.getAttribute('data-item-price'));

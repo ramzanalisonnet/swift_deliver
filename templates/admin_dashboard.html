@@ -3,12 +3,45 @@
 
 {% block content %}
 <div class="container">
+    <!-- Create User -->
+    <div class="glass card" style="max-width:800px;margin-bottom:2.5rem;">
+        <h3><i class="fas fa-user-plus" style="color:var(--primary);"></i> Create New User</h3>
+        <form id="createUserForm" style="margin-top:1rem;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="newUsername" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="newEmail" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="newPassword" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Role</label>
+                    <select id="newRole" class="form-control">
+                        {% for r in roles %}
+                        <option value="{{ r.0 }}">{{ r.1 }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary" style="margin-top:1rem;">
+                <span id="createUserText">Create User</span>
+                <span id="createUserSpinner" class="spinner" style="display:none;margin-left:8px;"></span>
+            </button>
+        </form>
+    </div>
+
     <!-- User Management -->
     <h2 style="margin-bottom:1.5rem;"><i class="fas fa-users" style="color:var(--primary);"></i> User Management</h2>
     <div class="glass table-wrap" style="margin-bottom:2.5rem;">
         <table>
             <thead>
-                <tr><th>ID</th><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Action</th></tr>
+                <tr><th>ID</th><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr>
             </thead>
             <tbody id="userTableBody">
                 {% for u in users %}
@@ -21,6 +54,9 @@
                     <td>
                         {% if not u.userprofile.is_approved and u.userprofile.role != 'CUSTOMER' %}
                         <button class="btn btn-sm btn-primary btn-approve" data-user-id="{{ u.id }}">Approve</button>
+                        {% endif %}
+                        {% if u != request.user %}
+                        <button class="btn btn-sm btn-outline btn-delete-user" data-user-id="{{ u.id }}" style="border-color:#e74c3c;color:#e74c3c;margin-left:0.5rem;">Delete</button>
                         {% endif %}
                     </td>
                 </tr>
@@ -64,7 +100,10 @@
                     <td>{{ o.destination.address }}</td>
                     <td>
                         <select class="form-control order-status-select" data-order-id="{{ o.id }}" style="min-width:140px;">
-                            <option value="PENDING" {% if o.status == 'PENDING' %}selected{% endif %}>Pending Courier</option>
+                            <option value="PENDING_MERCHANT" {% if o.status == 'PENDING_MERCHANT' %}selected{% endif %}>Pending Merchant</option>
+                            <option value="PREPARING" {% if o.status == 'PREPARING' %}selected{% endif %}>Preparing</option>
+                            <option value="READY_FOR_PICKUP" {% if o.status == 'READY_FOR_PICKUP' %}selected{% endif %}>Ready for Pickup</option>
+                            <option value="PENDING_COURIER" {% if o.status == 'PENDING_COURIER' %}selected{% endif %}>Pending Courier</option>
                             <option value="ACCEPTED" {% if o.status == 'ACCEPTED' %}selected{% endif %}>Accepted</option>
                             <option value="OUT_FOR_DELIVERY" {% if o.status == 'OUT_FOR_DELIVERY' %}selected{% endif %}>Out for Delivery</option>
                             <option value="DELIVERED" {% if o.status == 'DELIVERED' %}selected{% endif %}>Delivered</option>
@@ -82,6 +121,31 @@
 </div>
 
 <script>
+    /* ==================== JS: Admin Create User ==================== */
+    document.getElementById('createUserForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        document.getElementById('createUserText').textContent = 'Creating...';
+        document.getElementById('createUserSpinner').style.display = 'inline-block';
+
+        const payload = {
+            username: document.getElementById('newUsername').value,
+            email: document.getElementById('newEmail').value,
+            password: document.getElementById('newPassword').value,
+            role: document.getElementById('newRole').value
+        };
+
+        const data = await fetchAPI("{% url 'api_admin_create_user' %}", 'POST', payload);
+        if (data.success) {
+            showToast(data.message, 'success');
+            document.getElementById('createUserForm').reset();
+            setTimeout(function() { location.reload(); }, 800);
+        } else {
+            showToast(data.error, 'error');
+            document.getElementById('createUserText').textContent = 'Create User';
+            document.getElementById('createUserSpinner').style.display = 'none';
+        }
+    });
+
     /* ==================== JS: Admin Approve User ==================== */
     document.getElementById('userTableBody').addEventListener('click', async function(e) {
         if (e.target.classList.contains('btn-approve')) {
@@ -92,6 +156,22 @@
                 setTimeout(function() { location.reload(); }, 600);
             } else {
                 showToast('Approval failed.', 'error');
+            }
+        }
+    });
+
+    /* ==================== JS: Admin Delete User ==================== */
+    document.getElementById('userTableBody').addEventListener('click', async function(e) {
+        if (e.target.classList.contains('btn-delete-user')) {
+            const userId = e.target.getAttribute('data-user-id');
+            if (!confirm('Are you sure you want to delete this user? This cannot be undone.')) return;
+            
+            const data = await fetchAPI("{% url 'api_admin_delete_user' %}", 'POST', {user_id: parseInt(userId)});
+            if (data.success) {
+                showToast(data.message, 'success');
+                setTimeout(function() { location.reload(); }, 600);
+            } else {
+                showToast(data.error, 'error');
             }
         }
     });
@@ -115,11 +195,8 @@
             const orderId = e.target.getAttribute('data-order-id');
             const status = e.target.value;
             const data = await fetchAPI("{% url 'api_admin_update_order' %}", 'POST', {order_id: parseInt(orderId), status: status});
-            if (data.success) {
-                showToast('Status updated.', 'success');
-            } else {
-                showToast('Update failed.', 'error');
-            }
+            if (data.success) showToast('Status updated.', 'success');
+            else showToast('Update failed.', 'error');
         }
     });
 

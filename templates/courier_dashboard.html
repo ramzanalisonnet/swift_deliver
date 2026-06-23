@@ -3,7 +3,7 @@
 
 {% block content %}
 <div class="container">
-    <h2 style="margin-bottom:1.5rem;"><i class="fas fa-box" style="color:var(--primary);"></i> Available Orders</h2>
+    <h2 style="margin-bottom:1.5rem;"><i class="fas fa-box" style="color:var(--primary);"></i> Available Orders (Ready for Pickup)</h2>
     <div class="grid grid-3" id="availableList">
         {% for o in available_orders %}
         <div class="glass card" style="position:relative;">
@@ -14,9 +14,10 @@
             <p><i class="fas fa-store"></i> {{ o.merchant.username }}</p>
             <p><i class="fas fa-map-marker-alt" style="color:var(--primary);"></i> {{ o.destination.address }}</p>
             <p><i class="fas fa-clock" style="color:var(--secondary);"></i> Due: {{ o.due_time|default:"N/A" }}</p>
+            <p><i class="fas fa-user"></i> Customer: {{ o.customer.username }}</p>
         </div>
         {% empty %}
-        <p style="color:var(--text-light);">No available orders right now.</p>
+        <p style="color:var(--text-light);">No orders ready for pickup right now.</p>
         {% endfor %}
     </div>
 
@@ -37,7 +38,7 @@
                 <tr>
                     <td>#{{ o.id }}</td>
                     <td>{{ o.destination.address }}</td>
-                    <td><span class="badge badge-{{ o.status|lower }}">{{ o.status }}</span></td>
+                    <td><span class="badge badge-accepted">{{ o.status }}</span></td>
                     <td>
                         {% if o.status == 'ACCEPTED' %}
                         <button class="btn btn-sm btn-secondary btn-start-delivery" data-order-id="{{ o.id }}">Start</button>

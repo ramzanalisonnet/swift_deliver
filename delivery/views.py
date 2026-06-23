@@ -2,7 +2,7 @@
 All views and API endpoints for SwiftDeliver.
 """
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
@@ -10,11 +10,11 @@ from django.contrib.auth.models import User
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
-from datetime import datetime, timedelta
 from .models import UserProfile, Location, MenuItem, Order, OrderItem
 from .utils import (
     LOCATIONS_DATA, ensure_locations,
-    calculate_nearest_neighbor_route, validate_route_feasibility
+    calculate_nearest_neighbor_route, validate_route_feasibility,
+    get_location_data
 )
 
 
@@ -31,7 +31,6 @@ def login_view(request):
         password = request.POST.get('password')
         user = authenticate(request, username=username, password=password)
         if user:
-            # Ensure user has a profile (for users created before signals or via createsuperuser)
             try:
                 profile = user.userprofile
             except UserProfile.DoesNotExist:
@@ -64,7 +63,6 @@ def register_view(request):
         user = User.objects.create_user(username=username, email=email, password=password)
         approved = True if role == 'CUSTOMER' else False
 
-        # Use get_or_create because post_save signal may have already created a profile
         profile, created = UserProfile.objects.get_or_create(user=user)
         profile.role = role
         profile.is_approved = approved
@@ -125,12 +123,25 @@ def merchant_dashboard(request):
         return redirect('dashboard')
     ensure_locations()
     locations = Location.objects.filter(is_restaurant=False)
+    
+    # NEW: Orders pending merchant approval and preparing/ready orders
+    pending_orders = Order.objects.filter(merchant=request.user, status='PENDING_MERCHANT').order_by('-created_at')
+    preparing_orders = Order.objects.filter(merchant=request.user, status='PREPARING').order_by('-created_at')
+    ready_orders = Order.objects.filter(merchant=request.user, status='READY_FOR_PICKUP').order_by('-created_at')
+    past_orders = Order.objects.filter(merchant=request.user).exclude(
+        status__in=['PENDING_MERCHANT', 'PREPARING', 'READY_FOR_PICKUP']
+    ).order_by('-created_at')
+    
     orders = Order.objects.filter(merchant=request.user).order_by('-created_at')
     menu_items = MenuItem.objects.filter(merchant=request.user).order_by('-id')
     return render(request, 'merchant_dashboard.html', {
         'locations': locations,
         'orders': orders,
-        'menu_items': menu_items
+        'menu_items': menu_items,
+        'pending_orders': pending_orders,
+        'preparing_orders': preparing_orders,
+        'ready_orders': ready_orders,
+        'past_orders': past_orders
     })
 
 
@@ -141,7 +152,8 @@ def courier_dashboard(request):
     if request.user.userprofile.role != 'COURIER':
         return redirect('dashboard')
     ensure_locations()
-    available = Order.objects.filter(status='PENDING', courier__isnull=True).select_related('destination', 'merchant')
+    # NEW: Only show orders that are READY_FOR_PICKUP
+    available = Order.objects.filter(status='READY_FOR_PICKUP', courier__isnull=True).select_related('destination', 'merchant')
     my_orders = Order.objects.filter(courier=request.user).exclude(status='DELIVERED').select_related('destination')
     return render(request, 'courier_dashboard.html', {
         'available_orders': available,
@@ -213,7 +225,6 @@ def api_place_order(request):
     if due_time_str:
         try:
             due_time = datetime.fromisoformat(due_time_str.replace('T', ' ').replace('t', ' '))
-            # DO NOT make it aware - keep as naive local time
         except (ValueError, TypeError):
             due_time = datetime.now() + timedelta(hours=2)
     else:
@@ -223,7 +234,7 @@ def api_place_order(request):
         customer=request.user,
         merchant_id=merchant_id,
         destination_id=destination_id,
-        status='PENDING',
+        status='PENDING_MERCHANT',  # NEW: Starts as pending merchant approval
         due_time=due_time
     )
     total = 0
@@ -234,6 +245,128 @@ def api_place_order(request):
         total += float(mi.price) * qty
 
     return JsonResponse({'success': True, 'order_id': order.id, 'total': round(total, 2)})
+
+
+# ==================== API: cancel_order ====================
+@login_required
+@csrf_exempt
+def api_cancel_order(request):
+    """
+    Customer cancels order within 5 minutes of placement.
+    Cannot cancel if courier has already accepted (status beyond PENDING_MERCHANT).
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'})
+    
+    data = json.loads(request.body)
+    order_id = data.get('order_id')
+    
+    try:
+        order = Order.objects.get(id=order_id, customer=request.user)
+    except Order.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'Order not found.'})
+    
+    # Cannot cancel if status is beyond merchant pending (courier involved or preparing)
+    if order.status not in ['PENDING_MERCHANT']:
+        return JsonResponse({
+            'success': False, 
+            'error': 'Cannot cancel: Order is already being prepared or picked up by courier.'
+        })
+    
+    # Check 5-minute window
+    time_diff = (datetime.now() - order.created_at.replace(tzinfo=None)).total_seconds()
+    if time_diff > 300:  # 5 minutes = 300 seconds
+        return JsonResponse({
+            'success': False, 
+            'error': 'Cannot cancel: 5-minute cancellation window has expired.'
+        })
+    
+    order.status = 'CANCELLED'
+    order.save()
+    return JsonResponse({'success': True, 'message': 'Order cancelled successfully.'})
+
+
+# ==================== API: merchant_accept_order ====================
+@login_required
+@csrf_exempt
+def api_merchant_accept_order(request):
+    """
+    Merchant accepts an order and starts preparing food.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'})
+    
+    if request.user.userprofile.role != 'MERCHANT':
+        return JsonResponse({'success': False, 'error': 'Only merchants can accept orders.'})
+    
+    data = json.loads(request.body)
+    order_id = data.get('order_id')
+    
+    try:
+        order = Order.objects.get(id=order_id, merchant=request.user, status='PENDING_MERCHANT')
+    except Order.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'Order not found or already processed.'})
+    
+    order.status = 'PREPARING'
+    order.save()
+    return JsonResponse({'success': True, 'message': 'Order accepted. Start preparing food.'})
+
+
+# ==================== API: merchant_ready_for_pickup ====================
+@login_required
+@csrf_exempt
+def api_merchant_ready_for_pickup(request):
+    """
+    Merchant marks order as ready for courier pickup.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'})
+    
+    if request.user.userprofile.role != 'MERCHANT':
+        return JsonResponse({'success': False, 'error': 'Only merchants can update order status.'})
+    
+    data = json.loads(request.body)
+    order_id = data.get('order_id')
+    
+    try:
+        order = Order.objects.get(id=order_id, merchant=request.user, status='PREPARING')
+    except Order.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'Order not found or not in preparing status.'})
+    
+    order.status = 'READY_FOR_PICKUP'
+    order.save()
+    return JsonResponse({'success': True, 'message': 'Order is ready for courier pickup.'})
+
+
+# ==================== API: merchant_add_menu_item ====================
+@login_required
+@csrf_exempt
+def api_add_menu_item(request):
+    """
+    Merchant adds a new menu item to their restaurant.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'})
+    
+    if request.user.userprofile.role != 'MERCHANT':
+        return JsonResponse({'success': False, 'error': 'Only merchants can add menu items.'})
+    
+    data = json.loads(request.body)
+    name = data.get('name', '').strip()
+    description = data.get('description', '').strip()
+    price = data.get('price', 0)
+    
+    if not name or float(price) <= 0:
+        return JsonResponse({'success': False, 'error': 'Name and valid price are required.'})
+    
+    item = MenuItem.objects.create(
+        merchant=request.user,
+        name=name,
+        description=description,
+        price=float(price)
+    )
+    return JsonResponse({'success': True, 'item_id': item.id, 'name': item.name})
+
 
 # ==================== API: merchant_create_order ====================
 @login_required
@@ -253,7 +386,6 @@ def api_merchant_create_order(request):
     if due_time_str:
         try:
             due_time = datetime.fromisoformat(due_time_str.replace('T', ' ').replace('t', ' '))
-            # DO NOT make it aware - keep as naive local time
         except (ValueError, TypeError):
             due_time = datetime.now() + timedelta(hours=2)
     else:
@@ -265,7 +397,7 @@ def api_merchant_create_order(request):
         destination_id=data.get('destination_id'),
         due_time=due_time,
         notes=data.get('notes', ''),
-        status='PENDING'
+        status='PENDING_MERCHANT'
     )
     
     # Add order items
@@ -274,6 +406,7 @@ def api_merchant_create_order(request):
         OrderItem.objects.create(order=order, menu_item=menu_item, quantity=entry['quantity'])
     
     return JsonResponse({'success': True, 'order_id': order.id})
+
 
 # ==================== API: get_orders ====================
 @login_required
@@ -321,7 +454,7 @@ def api_accept_orders(request):
     if not order_ids:
         return JsonResponse({'success': False, 'error': 'No orders selected.'})
 
-    orders = list(Order.objects.filter(id__in=order_ids, status='PENDING', courier__isnull=True))
+    orders = list(Order.objects.filter(id__in=order_ids, status='READY_FOR_PICKUP', courier__isnull=True))
     if len(orders) != len(order_ids):
         return JsonResponse({'success': False, 'error': 'Some orders are no longer available.'})
 
@@ -332,12 +465,10 @@ def api_accept_orders(request):
             mid = o.destination.matrix_id
             destination_ids.append(mid)
             due = o.due_time
-            # Convert aware datetime to naive if needed
             if due is not None and hasattr(due, 'tzinfo') and due.tzinfo is not None:
                 due = due.replace(tzinfo=None)
             due_times[mid] = due
 
-    # Use naive local time for start
     start_time = datetime.now()
 
     is_feasible, route, details = validate_route_feasibility(destination_ids, due_times, start_time)
@@ -357,6 +488,7 @@ def api_accept_orders(request):
 
     return JsonResponse({'success': True, 'route': route, 'details': details})
 
+
 # ==================== API: update_status ====================
 @login_required
 @csrf_exempt
@@ -368,39 +500,9 @@ def api_update_status(request):
     order = get_object_or_404(Order, id=data.get('order_id'), courier=request.user)
     order.status = data.get('status', order.status)
     if order.status == 'DELIVERED':
-        order.delivered_at = timezone.now()
+        order.delivered_at = datetime.now()
     order.save()
     return JsonResponse({'success': True})
-
-
-# ==================== API: merchant_add_menu_item ====================
-@login_required
-@csrf_exempt
-def api_add_menu_item(request):
-    """
-    Merchant adds a new menu item to their restaurant.
-    """
-    if request.method != 'POST':
-        return JsonResponse({'success': False, 'error': 'POST required'})
-    
-    if request.user.userprofile.role != 'MERCHANT':
-        return JsonResponse({'success': False, 'error': 'Only merchants can add menu items.'})
-    
-    data = json.loads(request.body)
-    name = data.get('name', '').strip()
-    description = data.get('description', '').strip()
-    price = data.get('price', 0)
-    
-    if not name or float(price) <= 0:
-        return JsonResponse({'success': False, 'error': 'Name and valid price are required.'})
-    
-    item = MenuItem.objects.create(
-        merchant=request.user,
-        name=name,
-        description=description,
-        price=float(price)
-    )
-    return JsonResponse({'success': True, 'item_id': item.id, 'name': item.name})
 
 
 # ==================== API: courier_route ====================
@@ -431,6 +533,75 @@ def api_admin_users(request):
         'role': u.userprofile.role, 'is_approved': u.userprofile.is_approved
     } for u in users]
     return JsonResponse({'users': data})
+
+
+# ==================== API: admin_create_user ====================
+@login_required
+@csrf_exempt
+def api_admin_create_user(request):
+    """
+    Admin creates any user with specified role.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'})
+    
+    if request.user.userprofile.role != 'ADMIN':
+        return JsonResponse({'error': 'Forbidden'}, status=403)
+    
+    data = json.loads(request.body)
+    username = data.get('username', '').strip()
+    email = data.get('email', '').strip()
+    password = data.get('password', '').strip()
+    role = data.get('role', 'CUSTOMER')
+    
+    if not username or not password:
+        return JsonResponse({'success': False, 'error': 'Username and password are required.'})
+    
+    if User.objects.filter(username=username).exists():
+        return JsonResponse({'success': False, 'error': 'Username already exists.'})
+    
+    user = User.objects.create_user(username=username, email=email, password=password)
+    
+    # Set role and approval
+    profile, created = UserProfile.objects.get_or_create(user=user)
+    profile.role = role
+    profile.is_approved = True if role == 'CUSTOMER' else True  # Admin-created users are auto-approved
+    profile.save()
+    
+    return JsonResponse({
+        'success': True, 
+        'message': f'User {username} created successfully as {role}.',
+        'user_id': user.id
+    })
+
+
+# ==================== API: admin_delete_user ====================
+@login_required
+@csrf_exempt
+def api_admin_delete_user(request):
+    """
+    Admin deletes any user.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'})
+    
+    if request.user.userprofile.role != 'ADMIN':
+        return JsonResponse({'error': 'Forbidden'}, status=403)
+    
+    data = json.loads(request.body)
+    user_id = data.get('user_id')
+    
+    try:
+        user = User.objects.get(id=user_id)
+        # Prevent admin from deleting themselves
+        if user == request.user:
+            return JsonResponse({'success': False, 'error': 'You cannot delete your own account.'})
+        
+        username = user.username
+        user.delete()
+        return JsonResponse({'success': True, 'message': f'User {username} deleted successfully.'})
+    except User.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'User not found.'})
 
 
 # ==================== API: approve_user ====================

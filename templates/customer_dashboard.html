@@ -20,19 +20,26 @@
     <div class="glass table-wrap">
         <table>
             <thead>
-                <tr><th>Order #</th><th>Merchant</th><th>Status</th><th>Due Time</th><th>Items</th></tr>
+                <tr><th>Order #</th><th>Merchant</th><th>Status</th><th>Due Time</th><th>Items</th><th>Action</th></tr>
             </thead>
             <tbody id="orderTableBody">
                 {% for o in orders %}
                 <tr>
                     <td>#{{ o.id }}</td>
                     <td>{{ o.merchant.username }}</td>
-                    <td><span class="badge badge-{{ o.status|lower }}">{{ o.status }}</span></td>
+                    <td><span class="badge badge-pending">{{ o.status }}</span></td>
                     <td>{{ o.due_time|default:"N/A" }}</td>
                     <td>{{ o.items.count }} item(s)</td>
+                    <td>
+                        {% if o.status == 'PENDING_MERCHANT' %}
+                        <button class="btn btn-sm btn-outline btn-cancel-order" data-order-id="{{ o.id }}" style="border-color:#e74c3c;color:#e74c3c;">Cancel</button>
+                        {% else %}
+                        <span style="color:var(--text-light);font-size:0.85rem;">—</span>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="5" style="text-align:center;color:var(--text-light);">No orders yet.</td></tr>
+                <tr><td colspan="6" style="text-align:center;color:var(--text-light);">No orders yet.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -45,7 +52,7 @@
         <button id="closeMenuBtn" style="position:absolute;top:1rem;right:1rem;background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--text-light);"><i class="fas fa-times"></i></button>
         <h2 id="menuTitle" style="margin-bottom:1rem;color:var(--primary-dark);">Menu</h2>
 
-                <div class="form-group">
+        <div class="form-group">
             <label>Delivery Address</label>
             <select id="deliveryAddress" class="form-control">
                 {% for loc in locations %}
@@ -87,6 +94,22 @@
     /* ==================== JS: Place Order Button Handler ==================== */
     document.getElementById('placeOrderBtn').addEventListener('click', placeOrder);
 
+    /* ==================== JS: Cancel Order Delegation ==================== */
+    document.getElementById('orderTableBody').addEventListener('click', async function(e) {
+        if (e.target.classList.contains('btn-cancel-order')) {
+            const orderId = e.target.getAttribute('data-order-id');
+            if (!confirm('Are you sure you want to cancel this order?')) return;
+            
+            const data = await fetchAPI("{% url 'api_cancel_order' %}", 'POST', {order_id: parseInt(orderId)});
+            if (data.success) {
+                showToast(data.message, 'success');
+                setTimeout(function() { location.reload(); }, 600);
+            } else {
+                showToast(data.error, 'error');
+            }
+        }
+    });
+
     /* ==================== JS: Customer Menu & Cart Logic ==================== */
     let currentMerchantId = null;
     let cart = {};
@@ -94,6 +117,13 @@
     function openMenu(merchantId, merchantName) {
         currentMerchantId = merchantId;
         document.getElementById('menuTitle').textContent = merchantName + ' - Menu';
+        
+        // Set default due time to 2 hours from now
+        const now = new Date();
+        now.setHours(now.getHours() + 2);
+        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+        document.getElementById('dueTime').value = now.toISOString().slice(0, 16);
+        
         document.getElementById('menuModal').style.display = 'flex';
         document.getElementById('menuItems').innerHTML = '<p style="text-align:center;color:var(--text-light);">Loading...</p>';
         cart = {};
@@ -171,7 +201,7 @@
             return;
         }
 
-                const destinationId = document.getElementById('deliveryAddress').value;
+        const destinationId = document.getElementById('deliveryAddress').value;
         const dueTime = document.getElementById('dueTime').value;
         if (!dueTime) {
             showToast('Please select a due time.', 'error');

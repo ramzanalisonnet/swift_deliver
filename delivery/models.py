@@ -53,9 +53,12 @@ class MenuItem(models.Model):
 # ==================== MODEL: Order ====================
 class Order(models.Model):
     STATUS_CHOICES = [
-        ('PENDING', 'Pending Courier'),
-        ('ACCEPTED', 'Accepted'),
-        ('OUT_FOR_DELIVERY', 'Out for Delivery'),
+        ('PENDING_MERCHANT', 'Pending Merchant Approval'),  # NEW: Customer placed, waiting merchant
+        ('PREPARING', 'Preparing'),                          # NEW: Merchant accepted, making food
+        ('READY_FOR_PICKUP', 'Ready for Pickup'),           # NEW: Food ready, waiting courier
+        ('PENDING_COURIER', 'Pending Courier'),             # Available for courier acceptance
+        ('ACCEPTED', 'Accepted'),                            # Courier accepted
+        ('OUT_FOR_DELIVERY', 'Out for Delivery'),           # Courier delivering
         ('DELIVERED', 'Delivered'),
         ('CANCELLED', 'Cancelled'),
     ]
@@ -70,7 +73,7 @@ class Order(models.Model):
         limit_choices_to={'userprofile__role': 'COURIER'},
         related_name='courier_orders'
     )
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING_MERCHANT')
     destination = models.ForeignKey(Location, on_delete=models.CASCADE)
     due_time = models.DateTimeField()
     notes = models.TextField(blank=True)
@@ -91,9 +94,9 @@ class OrderItem(models.Model):
     @property
     def line_total(self):
         return self.menu_item.price * self.quantity
-    
 
-    # ==================== SIGNAL: Auto-create UserProfile on User creation ====================
+
+# ==================== SIGNAL: Auto-create UserProfile on User creation ====================
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.contrib.auth.models import User
@@ -102,10 +105,7 @@ from django.contrib.auth.models import User
 @receiver(post_save, sender=User)
 def create_user_profile(sender, instance, created, **kwargs):
     if created:
-        UserProfile.objects.get_or_create(
-            user=instance,
-            defaults={'role': 'CUSTOMER', 'is_approved': True}
-        )
+        UserProfile.objects.get_or_create(user=instance, defaults={'role': 'CUSTOMER', 'is_approved': True})
 
 
 @receiver(post_save, sender=User)

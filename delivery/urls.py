@@ -22,10 +22,13 @@ urlpatterns = [
     path('api/merchants/', views.api_merchants, name='api_merchants'),
     path('api/menu/<int:merchant_id>/', views.api_menu, name='api_menu'),
     path('api/place-order/', views.api_place_order, name='api_place_order'),
+    path('api/cancel-order/', views.api_cancel_order, name='api_cancel_order'),
 
     # Merchant APIs
-    path('api/merchant/create-order/', views.api_merchant_create_order, name='api_merchant_create_order'),
     path('api/merchant/add-menu-item/', views.api_add_menu_item, name='api_add_menu_item'),
+    path('api/merchant/create-order/', views.api_merchant_create_order, name='api_merchant_create_order'),
+    path('api/merchant/accept-order/', views.api_merchant_accept_order, name='api_merchant_accept_order'),
+    path('api/merchant/ready-for-pickup/', views.api_merchant_ready_for_pickup, name='api_merchant_ready_for_pickup'),
 
     # Courier APIs
     path('api/orders/', views.api_orders, name='api_orders'),
@@ -35,6 +38,8 @@ urlpatterns = [
 
     # Admin APIs
     path('api/admin/users/', views.api_admin_users, name='api_admin_users'),
+    path('api/admin/create-user/', views.api_admin_create_user, name='api_admin_create_user'),
+    path('api/admin/delete-user/', views.api_admin_delete_user, name='api_admin_delete_user'),
     path('api/admin/approve-user/', views.api_approve_user, name='api_approve_user'),
     path('api/admin/transfer-role/', views.api_transfer_role, name='api_transfer_role'),
     path('api/admin/orders/', views.api_admin_orders, name='api_admin_orders'),
