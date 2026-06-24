@@ -4,14 +4,30 @@
 {% block content %}
 <div class="container">
     <h2 style="margin-bottom:1rem;"><i class="fas fa-map-marked-alt" style="color:var(--primary);"></i> Simulated Route Map</h2>
+    
+    <!-- Route Info Panel -->
+    <div class="glass" style="padding:1.5rem;margin-bottom:1.5rem;">
+        <h3 style="color:var(--primary-dark);margin-bottom:1rem;"><i class="fas fa-route"></i> Route Details</h3>
+        <div id="routeInfo" style="display:flex;flex-wrap:wrap;gap:1rem;">
+            <p style="color:var(--text-light);">Loading route information...</p>
+        </div>
+        <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid rgba(0,0,0,0.1);">
+            <strong style="color:var(--primary-dark);font-size:1.1rem;">
+                <i class="fas fa-clock"></i> Total Travel Time: <span id="totalTime">--</span> minutes
+            </strong>
+        </div>
+    </div>
+
     <div class="glass" style="padding:1rem;text-align:center;">
         <canvas id="mapCanvas" width="800" height="600" style="max-width:100%;border-radius:12px;background:#eef2f5;"></canvas>
         <div style="margin-top:1rem;display:flex;gap:1.5rem;justify-content:center;flex-wrap:wrap;font-size:0.85rem;">
-            <span><span style="display:inline-block;width:12px;height:12px;background:var(--primary);border-radius:50%;margin-right:4px;"></span> Restaurant</span>
+            <span><span style="display:inline-block;width:12px;height:12px;background:var(--primary);border-radius:50%;margin-right:4px;"></span> Restaurant (Start)</span>
             <span><span style="display:inline-block;width:12px;height:12px;background:var(--secondary);border-radius:50%;margin-right:4px;"></span> Next Stop</span>
             <span><span style="display:inline-block;width:12px;height:12px;background:#3498db;border-radius:50%;margin-right:4px;"></span> Destination</span>
+            <span><span style="display:inline-block;width:12px;height:12px;background:#e74c3c;border-radius:50%;margin-right:4px;"></span> Completed</span>
         </div>
     </div>
+    
     <div style="margin-top:1.5rem;">
         <a href="{% url 'courier_dashboard' %}" class="btn btn-outline"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
     </div>
@@ -24,6 +40,7 @@
     const NODE_RADIUS = 14;
     let route = [];
     let locations = [];
+    let routeDetails = [];
     let pulseRadius = 0;
 
     async function loadRoute() {
@@ -31,53 +48,156 @@
         const data = await res.json();
         if (!data.success) {
             showToast(data.error, 'error');
+            document.getElementById('routeInfo').innerHTML = '<p style="color:var(--text-light);">No active delivery route found.</p>';
             return;
         }
         locations = data.locations;
         route = data.route;
+        routeDetails = data.details || [];
+        
+        displayRouteInfo();
         drawMap();
         animatePulse();
+    }
+
+    function displayRouteInfo() {
+        const container = document.getElementById('routeInfo');
+        let totalTime = 0;
+        let html = '';
+
+        if (route.length < 2) {
+            container.innerHTML = '<p style="color:var(--text-light);">No route to display.</p>';
+            return;
+        }
+
+        // Build route steps with times
+        for (let i = 0; i < route.length; i++) {
+            const loc = locations.find(l => l.matrix_id === route[i]);
+            const isRestaurant = i === 0;
+            const isLast = i === route.length - 1;
+            
+            let timeInfo = '';
+            let timeValue = 0;
+            
+            if (i > 0) {
+                // Find travel time from previous stop
+                const prevLoc = locations.find(l => l.matrix_id === route[i-1]);
+                const detail = routeDetails.find(d => d.matrix_id === route[i]);
+                if (detail) {
+                    timeValue = detail.travel_time;
+                    totalTime += timeValue;
+                    timeInfo = '<span style="color:var(--primary);font-weight:700;">+' + timeValue + ' min</span>';
+                }
+            }
+
+            html += 
+                '<div style="display:flex;align-items:center;gap:0.75rem;padding:0.75rem 1rem;background:rgba(255,255,255,0.5);border-radius:10px;min-width:200px;">' +
+                    '<div style="width:32px;height:32px;border-radius:50%;background:' + 
+                        (isRestaurant ? 'var(--primary)' : (isLast ? '#3498db' : 'var(--secondary)')) + 
+                        ';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.85rem;">' +
+                        (i + 1) +
+                    '</div>' +
+                    '<div>' +
+                        '<div style="font-weight:700;font-size:0.9rem;">' + loc.name + '</div>' +
+                        '<div style="font-size:0.8rem;color:var(--text-light);">' + (isRestaurant ? 'Start here' : (timeInfo || 'Destination')) + '</div>' +
+                    '</div>' +
+                '</div>';
+            
+            // Add arrow between stops (except last)
+            if (!isLast) {
+                html += '<div style="display:flex;align-items:center;color:var(--primary);"><i class="fas fa-arrow-right"></i></div>';
+            }
+        }
+
+        container.innerHTML = html;
+        document.getElementById('totalTime').textContent = totalTime;
     }
 
     function drawMap() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+        // Draw connection lines first (behind nodes)
+        if (route.length > 1) {
+            for (let i = 0; i < route.length - 1; i++) {
+                const start = locations.find(l => l.matrix_id === route[i]);
+                const end = locations.find(l => l.matrix_id === route[i+1]);
+                
+                // Draw line
+                ctx.beginPath();
+                ctx.moveTo(start.grid_x, start.grid_y);
+                ctx.lineTo(end.grid_x, end.grid_y);
+                ctx.strokeStyle = i === 0 ? '#e67e22' : '#bdc3c7';
+                ctx.lineWidth = i === 0 ? 4 : 2;
+                if (i > 0) ctx.setLineDash([5, 5]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Draw travel time label on line
+                const midX = (start.grid_x + end.grid_x) / 2;
+                const midY = (start.grid_y + end.grid_y) / 2;
+                const detail = routeDetails.find(d => d.matrix_id === route[i+1]);
+                if (detail) {
+                    // Background for text
+                    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+                    ctx.fillRect(midX - 20, midY - 10, 40, 20);
+                    
+                    ctx.fillStyle = '#e67e22';
+                    ctx.font = 'bold 11px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(detail.travel_time + ' min', midX, midY);
+                }
+            }
+        }
+
         // Draw all location nodes
         locations.forEach(loc => {
-            const isRestaurant = loc.is_restaurant;
             const inRoute = route.includes(loc.matrix_id);
-            const isNext = route.length > 0 && loc.matrix_id === route[1];
+            const routeIndex = route.indexOf(loc.matrix_id);
+            const isRestaurant = loc.is_restaurant;
+            const isNext = route.length > 1 && route[1] === loc.matrix_id;
+            const isCompleted = routeIndex > 0 && routeIndex < route.length - 1;
 
             ctx.beginPath();
             ctx.arc(loc.grid_x, loc.grid_y, NODE_RADIUS, 0, Math.PI * 2);
-            ctx.fillStyle = isRestaurant ? '#e67e22' : (isNext ? '#1abc9c' : (inRoute ? '#3498db' : '#7f8c8d'));
+            
+            if (isRestaurant) {
+                ctx.fillStyle = '#e67e22';
+            } else if (isNext) {
+                ctx.fillStyle = '#1abc9c';
+            } else if (isCompleted) {
+                ctx.fillStyle = '#e74c3c';
+            } else if (inRoute) {
+                ctx.fillStyle = '#3498db';
+            } else {
+                ctx.fillStyle = '#7f8c8d';
+            }
+            
             ctx.fill();
             ctx.strokeStyle = '#fff';
             ctx.lineWidth = 3;
             ctx.stroke();
 
+            // Stop number badge
+            if (inRoute) {
+                ctx.beginPath();
+                ctx.arc(loc.grid_x + 10, loc.grid_y - 10, 10, 0, Math.PI * 2);
+                ctx.fillStyle = '#2c3e50';
+                ctx.fill();
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 10px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(routeIndex + 1, loc.grid_x + 10, loc.grid_y - 10);
+            }
+
             // Labels
             ctx.fillStyle = '#2c3e50';
             ctx.font = 'bold 12px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(loc.name, loc.grid_x, loc.grid_y + 28);
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(loc.name, loc.grid_x, loc.grid_y - 20);
         });
-
-        // Draw route polyline
-        if (route.length > 1) {
-            ctx.beginPath();
-            ctx.strokeStyle = '#e67e22';
-            ctx.lineWidth = 4;
-            ctx.setLineDash([8, 6]);
-            const start = locations.find(l => l.matrix_id === route[0]);
-            ctx.moveTo(start.grid_x, start.grid_y);
-            for (let i = 1; i < route.length; i++) {
-                const pt = locations.find(l => l.matrix_id === route[i]);
-                ctx.lineTo(pt.grid_x, pt.grid_y);
-            }
-            ctx.stroke();
-            ctx.setLineDash([]);
-        }
     }
 
     function animatePulse() {
@@ -93,7 +213,7 @@
         // Pulse ring around next stop
         ctx.beginPath();
         ctx.arc(nextLoc.grid_x, nextLoc.grid_y, pulseRadius, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(26, 188, 156, ${1 - pulseRadius/30})`;
+        ctx.strokeStyle = 'rgba(26, 188, 156, ' + (1 - pulseRadius/30) + ')';
         ctx.lineWidth = 3;
         ctx.stroke();
 
