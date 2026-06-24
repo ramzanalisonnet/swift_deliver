@@ -1,5 +1,5 @@
 """
-Project-level URL configuration.
+Root URL configuration for SwiftDeliver project.
 """
 from django.contrib import admin
 from django.urls import path, include

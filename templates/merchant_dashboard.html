@@ -22,6 +22,20 @@
                     <label>Price ($)</label>
                     <input type="number" id="itemPrice" class="form-control" step="0.01" min="0.01" placeholder="9.99" required>
                 </div>
+                <div class="form-group">
+                    <label>Image URL</label>
+                    <input type="url" id="itemImage" class="form-control" placeholder="https://example.com/image.jpg">
+                </div>
+                <div class="form-group">
+                    <label>Restaurant Location</label>
+                    <select id="itemRestaurantLocation" class="form-control" required>
+                        {% for rl in restaurant_locations %}
+                        <option value="{{ rl.id }}">{{ rl.name }} - {{ rl.address }}</option>
+                        {% empty %}
+                        <option value="">No restaurants available</option>
+                        {% endfor %}
+                    </select>
+                </div>
                 <button type="submit" class="btn btn-primary">
                     <span id="menuBtnText">Add Item</span>
                     <span id="menuSpinner" class="spinner" style="display:none;margin-left:8px;"></span>
@@ -35,7 +49,7 @@
             <p style="color:var(--text-light);font-size:0.9rem;margin-bottom:1rem;">Create an order with items for courier delivery.</p>
             <form id="merchantOrderForm">
                 {% csrf_token %}
-                
+
                 <!-- Item Selection -->
                 <div class="form-group">
                     <label>Select Items & Quantities</label>
@@ -45,6 +59,9 @@
                             <div>
                                 <strong>{{ item.name }}</strong>
                                 <span style="color:var(--text-light);font-size:0.85rem;"> - ${{ item.price }}</span>
+                                {% if item.restaurant_location %}
+                                <span style="font-size:0.75rem;color:var(--secondary);display:block;"><i class="fas fa-map-marker-alt"></i> {{ item.restaurant_location.name }}</span>
+                                {% endif %}
                             </div>
                             <div style="display:flex;align-items:center;gap:0.5rem;">
                                 <button type="button" class="btn btn-sm btn-outline btn-qty-minus">-</button>
@@ -62,19 +79,19 @@
                     <label>Delivery Destination</label>
                     <select id="mDestination" class="form-control">
                         {% for loc in locations %}
-                        <option value="{{ loc.id }}">{{ loc.name }} - {{ loc.address }}</option>
+                        <option value="{{ loc.id }}" data-matrix-id="{{ loc.matrix_id }}">{{ loc.name }} - {{ loc.address }}</option>
                         {% endfor %}
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>Required Due Time</label>
-                    <input type="datetime-local" id="mDueTime" class="form-control" required>
+                    <label>Required Due Time <span style="font-weight:400;color:var(--text-light);">(auto-calculated from distance)</span></label>
+                    <input type="datetime-local" id="mDueTime" class="form-control" readonly style="background:rgba(0,0,0,0.03);">
                 </div>
                 <div class="form-group">
                     <label>Notes</label>
                     <textarea id="mNotes" class="form-control" rows="2" placeholder="Special instructions..."></textarea>
                 </div>
-                
+
                 <div style="display:flex;justify-content:space-between;align-items:center;">
                     <strong style="color:var(--primary-dark);">Total: $<span id="orderTotal">0.00</span></strong>
                     <button type="submit" class="btn btn-secondary">
@@ -167,8 +184,17 @@
     <div class="grid grid-4" id="menuItemsList">
         {% for item in menu_items %}
         <div class="glass card">
+            {% if item.image %}
+            <img src="{{ item.image }}" class="menu-item-img" alt="{{ item.name }}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+            <div class="menu-item-img-placeholder" style="display:none;"><i class="fas fa-utensils"></i></div>
+            {% else %}
+            <div class="menu-item-img-placeholder"><i class="fas fa-utensils"></i></div>
+            {% endif %}
             <h4>{{ item.name }}</h4>
             <p style="font-size:0.85rem;color:var(--text-light);">{{ item.description }}</p>
+            {% if item.restaurant_location %}
+            <p style="font-size:0.8rem;color:var(--secondary);"><i class="fas fa-map-marker-alt"></i> {{ item.restaurant_location.name }}</p>
+            {% endif %}
             <strong style="color:var(--primary-dark);font-size:1.1rem;">${{ item.price }}</strong>
         </div>
         {% empty %}
@@ -210,7 +236,9 @@
         const payload = {
             name: document.getElementById('itemName').value,
             description: document.getElementById('itemDesc').value,
-            price: parseFloat(document.getElementById('itemPrice').value)
+            price: parseFloat(document.getElementById('itemPrice').value),
+            image_url: document.getElementById('itemImage').value,
+            restaurant_location_id: parseInt(document.getElementById('itemRestaurantLocation').value)
         };
 
         const data = await fetchAPI("{% url 'api_add_menu_item' %}", 'POST', payload);
@@ -256,7 +284,7 @@
     /* ==================== JS: Merchant Order Item Quantity Logic ==================== */
     const itemPrices = {};
     const orderCart = {};
-    
+
     document.querySelectorAll('.order-item-row').forEach(function(row) {
         const itemId = parseInt(row.getAttribute('data-item-id'));
         const itemPrice = parseFloat(row.getAttribute('data-item-price'));
@@ -275,33 +303,63 @@
     document.getElementById('orderItemsList').addEventListener('click', function(e) {
         const btn = e.target;
         if (!btn.classList.contains('btn-qty-minus') && !btn.classList.contains('btn-qty-plus')) return;
-        
+
         const row = btn.closest('.order-item-row');
         if (!row) return;
-        
+
         const itemId = parseInt(row.getAttribute('data-item-id'));
         const input = row.querySelector('.qty-input');
-        
+
         if (btn.classList.contains('btn-qty-minus')) {
             orderCart[itemId] = Math.max(0, orderCart[itemId] - 1);
         } else {
             orderCart[itemId] = orderCart[itemId] + 1;
         }
-        
+
         input.value = orderCart[itemId];
         updateOrderTotal();
     });
 
+    /* ==================== JS: Auto-calculate due time for merchant order ==================== */
+    document.getElementById('mDestination').addEventListener('change', updateMerchantDueTime);
+
+    async function updateMerchantDueTime() {
+        const destSelect = document.getElementById('mDestination');
+        const destId = parseInt(destSelect.value);
+
+        // Get the selected item to determine restaurant location
+        const selectedItems = Object.keys(orderCart).filter(function(id) {
+            return orderCart[id] > 0;
+        });
+
+        if (selectedItems.length === 0) {
+            // No items selected yet, show default
+            const now = new Date();
+            now.setHours(now.getHours() + 2);
+            now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+            document.getElementById('mDueTime').value = now.toISOString().slice(0, 16);
+            return;
+        }
+
+        // Fetch item details to get restaurant location
+        // For simplicity, we'll let the backend auto-calculate on submission
+        // and just show a placeholder here
+        const now = new Date();
+        now.setHours(now.getHours() + 2);
+        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+        document.getElementById('mDueTime').value = now.toISOString().slice(0, 16);
+    }
+
     /* ==================== JS: Merchant Order Creation with Items ==================== */
     document.getElementById('merchantOrderForm').addEventListener('submit', async function(e) {
         e.preventDefault();
-        
+
         const items = Object.keys(orderCart).filter(function(id) {
             return orderCart[id] > 0;
         }).map(function(id) {
             return {id: parseInt(id), quantity: orderCart[id]};
         });
-        
+
         if (items.length === 0) {
             showToast('Please select at least one item.', 'error');
             return;
@@ -312,14 +370,13 @@
 
         const payload = {
             destination_id: parseInt(document.getElementById('mDestination').value),
-            due_time: document.getElementById('mDueTime').value,
             notes: document.getElementById('mNotes').value,
             items: items
         };
 
         const data = await fetchAPI("{% url 'api_merchant_create_order' %}", 'POST', payload);
         if (data.success) {
-            showToast('Order #' + data.order_id + ' placed successfully!', 'success');
+            showToast('Order #' + data.order_id + ' placed successfully! Due: ' + new Date(data.due_time).toLocaleString(), 'success');
             setTimeout(function() { location.reload(); }, 600);
         } else {
             showToast('Failed to place order.', 'error');

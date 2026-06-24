@@ -12,6 +12,7 @@
             </div>
             <h3>Order #{{ o.id }}</h3>
             <p><i class="fas fa-store"></i> {{ o.merchant.username }}</p>
+            <p><i class="fas fa-warehouse" style="color:var(--primary);"></i> Pickup: {{ o.restaurant_location.name|default:"Unknown" }}</p>
             <p><i class="fas fa-map-marker-alt" style="color:var(--primary);"></i> {{ o.destination.address }}</p>
             <p><i class="fas fa-clock" style="color:var(--secondary);"></i> Due: {{ o.due_time|default:"N/A" }}</p>
             <p><i class="fas fa-user"></i> Customer: {{ o.customer.username }}</p>
@@ -31,12 +32,13 @@
     <div class="glass table-wrap">
         <table>
             <thead>
-                <tr><th>Order #</th><th>Destination</th><th>Status</th><th>Actions</th></tr>
+                <tr><th>Order #</th><th>Pickup</th><th>Destination</th><th>Status</th><th>Actions</th></tr>
             </thead>
             <tbody id="myDeliveriesTable">
                 {% for o in my_orders %}
                 <tr>
                     <td>#{{ o.id }}</td>
+                    <td>{{ o.restaurant_location.name|default:"Unknown" }}</td>
                     <td>{{ o.destination.address }}</td>
                     <td><span class="badge badge-accepted">{{ o.status }}</span></td>
                     <td>
@@ -48,7 +50,7 @@
                     </td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="4" style="text-align:center;color:var(--text-light);">No active deliveries.</td></tr>
+                <tr><td colspan="5" style="text-align:center;color:var(--text-light);">No active deliveries.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

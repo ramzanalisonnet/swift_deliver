@@ -83,14 +83,12 @@
 </div>
 
 <script>
-    /* ==================== JS: Role Selection ==================== */
     function selectRole(el) {
         document.querySelectorAll('.role-option').forEach(o => o.classList.remove('active'));
         el.classList.add('active');
         document.getElementById('regRole').value = el.dataset.role;
     }
 
-    /* ==================== JS: Registration Handler ==================== */
     document.getElementById('registerForm').addEventListener('submit', async function(e) {
         e.preventDefault();
         const btnText = document.getElementById('regText');
