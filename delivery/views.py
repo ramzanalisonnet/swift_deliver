@@ -512,6 +512,14 @@ def api_accept_orders(request):
     if not order_ids:
         return JsonResponse({'success': False, 'error': 'No orders selected.'})
 
+    # BUG FIX: Courier cannot accept new orders if they already have active (non-delivered) deliveries
+    active_orders = Order.objects.filter(courier=request.user).exclude(status='DELIVERED')
+    if active_orders.exists():
+        return JsonResponse({
+            'success': False, 
+            'error': 'You have active deliveries in progress. Please complete them before accepting new orders.'
+        })
+
     orders = list(Order.objects.filter(id__in=order_ids, status='READY_FOR_PICKUP', courier__isnull=True).select_related('restaurant_location', 'destination'))
     if len(orders) != len(order_ids):
         return JsonResponse({'success': False, 'error': 'Some orders are no longer available.'})
